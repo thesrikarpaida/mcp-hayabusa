@@ -1,0 +1,17 @@
+{
+  "mcpServers": {
+    "hayabusa": {
+      "type": "stdio",
+      "command": "uv",
+      "args": [
+        "run",
+        "--directory",
+        "${CLAUDE_PROJECT_DIR:-.}",
+        "mcp-hayabusa"
+      ],
+      "env": {
+        "HAYABUSA_PATH": "./hayabusa/hayabusa"
+      }
+    }
+  }
+}

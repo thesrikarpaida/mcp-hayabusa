@@ -1,0 +1,6 @@
+# Prefer uv for dependency management (see Makefile / README.md).
+# This file is a fallback for environments without uv.
+# With uv: `uv sync --extra dev` installs everything from pyproject.toml.
+
+mcp[cli]>=1.2.0
+PyYAML>=6.0

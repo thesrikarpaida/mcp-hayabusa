@@ -1,0 +1,38 @@
+title: PowerShell Encoded Command Execution
+id: 6f1a4b2e-9c3d-4e5f-8a71-2b3c4d5e6f70
+status: experimental
+description: |
+    Detects powershell.exe launched with an encoded command payload, which is
+    routinely used to obscure script contents from command-line logging.
+    Encoded commands are also used by legitimate tooling, so this is scoped to
+    the flag rather than to payload contents and is expected to need tuning.
+references:
+    - https://attack.mitre.org/techniques/T1027/010/
+    - https://attack.mitre.org/techniques/T1059/001/
+author: mcp-hayabusa
+date: 2026-07-15
+tags:
+    - attack.execution
+    - attack.defense-evasion
+    - attack.t1059.001
+    - attack.t1027.010
+logsource:
+    product: windows
+    service: security
+detection:
+    security:
+        Channel: Security
+    selection:
+        EventID: 4688
+        NewProcessName|endswith: \powershell.exe
+    encoded:
+        ProcessCommandLine|contains:
+            - ' -enc '
+            - ' -EncodedCommand '
+            - ' -e '
+    condition: security and selection and encoded
+falsepositives:
+    - Administrative scripts and configuration-management agents that wrap
+      PowerShell payloads in base64
+level: medium
+ruletype: Sigma
