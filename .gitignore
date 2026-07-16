@@ -9,21 +9,7 @@ dist/
 .pytest_cache/
 .ruff_cache/
 
-# uv.lock IS committed: this is an application with a pinned console entry point,
-# so a reproducible dependency tree is the point. (Libraries would omit it.)
-
-# Third-party, downloaded — NOT ours to redistribute.
-# ./scripts/install_hayabusa.sh fetches this (make setup runs it): the ~16MB
-# hayabusa binary (AGPL-3.0, Yamato Security) plus ~55MB / 4,960 bundled Sigma
-# rules under their own licences. Committing them would bloat the repo to ~70MB
-# and republish someone else's licensed work under ours.
-# Note the KB reads hayabusa/config/mitre_tactics.txt and hayabusa/rules/ from
-# here, so a fresh clone has only the 2 custom rules until 'make setup' runs.
-hayabusa/
-
-# Hayabusa artifacts / evidence — never commit event logs or timelines.
-# This covers samples/*.evtx too: those are public test fixtures, but they are
-# re-fetchable with ./scripts/fetch_samples.sh and the repo carries no event logs.
+# Evidence & timeline artifacts — never commit event logs or timelines
 *.evtx
 *.evtx.zip
 timelines/
@@ -31,7 +17,5 @@ output/
 *.csv
 *.jsonl
 
-# Derived rule index — rebuilt from the rule corpus with 'make build-index'.
-# mappings/attack.yaml is generated too, but IS committed: it is reviewable,
-# and committing it keeps the server offline for anyone who clones this.
+# Derived rule index
 .cache/
