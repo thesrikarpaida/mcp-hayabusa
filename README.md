@@ -36,9 +36,19 @@ Full detail in [Register with Claude Code](#register-with-claude-code) below.
 
 ## Prerequisites
 
-**Python 3.10+** and [`uv`](https://docs.astral.sh/uv/). That's it — `make setup`
-downloads the Hayabusa binary for you (`scripts/install_hayabusa.sh` detects your
-glibc version and picks the `gnu` or `musl` build accordingly).
+- **Linux x64**, or **WSL2** on Windows. The installer fetches a Linux x64 Hayabusa
+  build only, so `make setup` does **not** work on native Windows or macOS — Windows
+  users should run everything inside WSL2. Hayabusa itself ships `win-x64` and `mac-*`
+  builds; to use one, download it from
+  [Hayabusa's releases](https://github.com/Yamato-Security/hayabusa/releases) and point
+  `HAYABUSA_PATH` at it (the knowledge base is pure Python and runs on any OS regardless).
+- **Python 3.10+** and [`uv`](https://docs.astral.sh/uv/). `uv` is the only thing you
+  strictly need to install by hand — it can bootstrap Python for you (`uv python install`).
+  No `uv`? Plain `pip` works too (see [Without `make` / `uv`](#install) below); it reads
+  the same `pyproject.toml`.
+
+`make setup` downloads the Hayabusa binary for you (`scripts/install_hayabusa.sh` detects
+your glibc version and picks the `gnu` or `musl` build accordingly).
 
 ## Install
 
@@ -51,12 +61,18 @@ every Sigma rule once so the server can answer instantly afterwards. Without it,
 first knowledge-base call pays that cost instead.
 
 <details>
-<summary>Without <code>make</code> / <code>uv</code></summary>
+<summary>Without <code>make</code> / <code>uv</code> (plain pip)</summary>
+
+`pip` reads `pyproject.toml` directly — no `uv`, no `requirements.txt`:
 
 ```bash
-pip install -e ".[dev]"
-python -c "from mcp_hayabusa import kb; kb.load_index(rebuild=True)"
+pip install -e ".[dev]"                                            # deps + the mcp-hayabusa entry point
+./scripts/install_hayabusa.sh                                      # fetch the Hayabusa binary (Linux x64)
+python -c "from mcp_hayabusa import kb; kb.load_index(rebuild=True)"  # build the rule index
 ```
+
+Note `pip` won't install a Python interpreter for you the way `uv` does — you need
+Python 3.10+ already on `PATH`.
 </details>
 
 ## Layout
