@@ -53,6 +53,27 @@ class Config:
     # for which "attack.*" tags are tactics rather than techniques/groups/software.
     tactics_file: Path = ROOT / "hayabusa" / "config" / "mitre_tactics.txt"
 
+    # MongoDB is an *additive* backing store: it holds the same rule/technique
+    # data as .cache/rule_index.json plus the multi-framework and multi-version
+    # history the JSON cache cannot express. The cache stays authoritative for
+    # the MCP server, so every tool keeps working with Mongo stopped.
+
+    # Connection string. No auth by default, which is right for local dev and
+    # wrong for anything shared.
+    mongo_uri: str = "mongodb://localhost:27017/"
+
+    # Database name inside that server.
+    mongo_db: str = "hayabusa"
+
+    # Off by default. Nothing in the server path touches Mongo unless this is
+    # set, so a stopped container can never break a scan or a coverage query.
+    mongo_enabled: bool = False
+
+    # Ceiling (milliseconds) on server selection. Deliberately short: when Mongo
+    # is down the caller should fall back to the JSON cache promptly rather than
+    # wait out pymongo's 30s default.
+    mongo_timeout_ms: int = 3000
+
 
 def _rules_dirs() -> tuple[Path, ...]:
     """Parse HAYABUSA_RULES_DIR, defaulting to custom rules/ + the bundled corpus.
@@ -67,6 +88,14 @@ def _rules_dirs() -> tuple[Path, ...]:
         return tuple(Path(p).expanduser() for p in raw.split(os.pathsep) if p.strip())
     bundled = ROOT / "hayabusa" / "rules"
     return (ROOT / "rules", bundled / "hayabusa", bundled / "sigma")
+
+
+def _flag(name: str, default: bool = False) -> bool:
+    """Read a boolean env var. Accepts 1/true/yes/on, case-insensitive."""
+    raw = os.environ.get(name)
+    if raw is None:
+        return default
+    return raw.strip().lower() in {"1", "true", "yes", "on"}
 
 
 def load_config() -> Config:
@@ -84,6 +113,10 @@ def load_config() -> Config:
                 "HAYABUSA_TACTICS_FILE", str(ROOT / "hayabusa" / "config" / "mitre_tactics.txt")
             )
         ),
+        mongo_uri=os.environ.get("HAYABUSA_MONGO_URI", "mongodb://localhost:27017/"),
+        mongo_db=os.environ.get("HAYABUSA_MONGO_DB", "hayabusa"),
+        mongo_enabled=_flag("HAYABUSA_MONGO_ENABLED"),
+        mongo_timeout_ms=int(os.environ.get("HAYABUSA_MONGO_TIMEOUT_MS", "3000")),
     )
 
 

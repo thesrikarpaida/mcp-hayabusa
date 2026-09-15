@@ -1,0 +1,47 @@
+# OWASP top-ten risk taxonomies for LLM and agentic systems.
+#
+# Hand-maintained on purpose. ATT&CK and ATLAS are ingested from STIX bundles
+# because they are large, versioned and machine-published; these are twenty
+# items with no feed worth wiring up, so the file *is* the source. Update it by
+# hand when OWASP publishes a new edition and bump `version`.
+#
+# Loaded by scripts/load_owasp.py into the same `attack_techniques` collection
+# as ATT&CK and ATLAS, with `technique_id` set to LLM01 / ASI01. Sharing the
+# collection is the point: one coverage query then spans conventional, AI and
+# agentic risk taxonomies instead of three queries against three shapes.
+#
+# These are risk *categories*, not detection techniques — no Sigma rule maps to
+# LLM01 today, so coverage against them reads as a wall of gaps. That is an
+# honest answer about EVTX-based detection, not a defect in the query.
+
+- framework: owasp-llm-top-10
+  name: OWASP Top 10 for Large Language Model Applications
+  version: "2026"
+  url: https://owasp.org/www-project-top-10-for-large-language-model-applications/
+  entries:
+    - {id: LLM01, name: Prompt Injection}
+    - {id: LLM02, name: Sensitive Information Disclosure}
+    - {id: LLM03, name: Excessive Agency}
+    - {id: LLM04, name: Supply Chain}
+    - {id: LLM05, name: Data and Model Poisoning}
+    - {id: LLM06, name: Unbounded Consumption}
+    - {id: LLM07, name: Misinformation}
+    - {id: LLM08, name: Hidden Context Exposure}
+    - {id: LLM09, name: Vector and Embedding Weaknesses}
+    - {id: LLM10, name: Improper Output Handling}
+
+- framework: owasp-agentic-top-10
+  name: OWASP Top 10 for Agentic AI Systems
+  version: "2026"
+  url: https://owasp.org/www-project-top-10-for-large-language-model-applications/
+  entries:
+    - {id: ASI01, name: Agent Goal Hijack}
+    - {id: ASI02, name: Tool Misuse and Exploitation}
+    - {id: ASI03, name: Identity and Privilege Abuse}
+    - {id: ASI04, name: Agentic Supply Chain Vulnerabilities}
+    - {id: ASI05, name: Unexpected Code Execution}
+    - {id: ASI06, name: Memory and Context Poisoning}
+    - {id: ASI07, name: Insecure Inter-Agent Communication}
+    - {id: ASI08, name: Cascading Failures}
+    - {id: ASI09, name: Human-Agent Trust Exploitation}
+    - {id: ASI10, name: Rogue Agents}

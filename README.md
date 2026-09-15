@@ -19,7 +19,7 @@ actually observed.
 ## Quickstart
 
 ```bash
-git clone <this repo> && cd mcp-hayabusa
+git clone https://github.com/thesrikarpaida/mcp-hayabusa.git && cd mcp-hayabusa
 make setup          # deps + hayabusa binary + rule index (~3-4 min)
 ```
 
@@ -29,7 +29,7 @@ Then open the repo in Claude Code and approve the `hayabusa` server when prompte
 
 ```bash
 claude mcp list                      # hayabusa: connected
-uv run pytest -m "not integration"   # 83 unit tests, ~5s
+uv run pytest -m "not integration"   # 136 unit tests, no binary needed
 ```
 
 Full detail in [Register with Claude Code](#register-with-claude-code) below.
@@ -80,7 +80,8 @@ Python 3.10+ already on `PATH`.
 | Path            | What                                                             |
 | --------------- | ---------------------------------------------------------------- |
 | `rules/`        | Your custom Sigma rules. Re-scanned on every load — edits are live. |
-| `mappings/`     | `attack.yaml`: ATT&CK metadata, generated from MITRE's STIX bundle and committed. |
+| `mappings/`     | `attack.yaml` / `atlas.yaml`: framework metadata, generated from STIX bundles and committed. |
+| `data/`         | `owasp_frameworks.yaml`: the two OWASP top-tens. Hand-maintained — twenty items need no feed. |
 | `samples/`      | Sample EVTX for end-to-end testing (`./scripts/fetch_samples.sh`). Logs are gitignored. |
 | `hayabusa/rules/sigma/` | The bundled Sigma corpus (4,767 rules). Indexed, cached, rebuilt on demand. |
 | `hayabusa/rules/hayabusa/` | Hayabusa's own built-in rules (196, from 193 files). **Also indexed** — it scans with these too. |
@@ -110,6 +111,10 @@ The server reads these environment variables:
 | `HAYABUSA_MAPPINGS_DIR` | `mappings/`                        | Where `attack.yaml` lives.                                      |
 | `HAYABUSA_INDEX_CACHE`  | `.cache/rule_index.json`           | Parsed rule index.                                              |
 | `HAYABUSA_TACTICS_FILE` | `hayabusa/config/mitre_tactics.txt`| Tactic list used to classify `attack.*` tags.                   |
+| `HAYABUSA_MONGO_URI`    | `mongodb://localhost:27017/`       | MongoDB connection string for the optional backing store.       |
+| `HAYABUSA_MONGO_DB`     | `hayabusa`                         | Database name inside that server.                               |
+| `HAYABUSA_MONGO_ENABLED`| `false`                            | Opt-in flag. The only thing it switches on is scan-run persistence; nothing else in the server path touches Mongo. |
+| `HAYABUSA_MONGO_TIMEOUT_MS` | `3000`                         | Server-selection ceiling, kept short so a stopped container falls back fast. |
 
 The knowledge base never spawns the binary — only the scanning tools need it. It does
 read two things `make setup` downloads, though: the rule corpus it indexes, and
@@ -290,32 +295,160 @@ and rolls the results up by ATT&CK technique and tactic:
 cache, so run `make build-index`. `max_results` (default 100) caps `detections`; the
 rollup always covers every hit.
 
+## MongoDB backing store (optional)
+
+The rule index also has a MongoDB representation. It is **additive**:
+`.cache/rule_index.json` stays the authority the MCP server reads, so with the container
+stopped every tool, resource and test still works. Nothing here is on the server's hot
+path unless `HAYABUSA_MONGO_ENABLED` is set.
+
+```bash
+make mongo-up       # start MongoDB 8.0 in Docker (named volume, so data survives)
+make load-mongo     # ingest the rule index + ATT&CK mappings (~4,965 rules)
+make load-atlas     # MITRE ATLAS (needs 'make atlas-bundle' first)
+make load-owasp     # the two OWASP top-tens
+make diff-versions  # compare two ATT&CK releases, report affected Sigma rules
+make coverage-all   # coverage across all four frameworks in one aggregation
+make mongo-stats    # counts per collection, index totals, per-framework inventory
+make mongo-shell    # interactive mongosh against the hayabusa database
+make mongo-down     # stop the container (the volume, and so the data, survives)
+```
+
+No authentication, which is correct for local development and wrong for anything shared.
+
+### Why it exists
+
+The JSON cache is a flat snapshot with no version axis and no framework axis. Two things
+follow that it cannot express:
+
+- **Four frameworks in one collection.** ATT&CK Enterprise, MITRE ATLAS and both OWASP
+  top-tens share `attack_techniques`, keyed by `framework`, so one coverage query spans
+  conventional, AI and agentic risk taxonomies.
+- **Several releases of one framework, side by side.** When ATT&CK revokes a technique,
+  every Sigma rule still tagged with the old id quietly stops resolving — nothing errors,
+  coverage just drops. Keeping both releases is what lets you ask what a change cost.
+
+### Collections
+
+MongoDB creates a collection implicitly on first write; there is no schema step. The
+database enforces nothing about these shapes — the application does. Field names mirror
+the `Rule` dataclass in `kb.py` rather than inventing parallel ones.
+
+| Collection | One document per | Notable fields |
+| --- | --- | --- |
+| `sigma_rules` | Sigma rule | `rule_id`, `techniques[]`, `tactics[]`, `level`, `source`, `platform`, `log_source` |
+| `attack_techniques` | technique, per framework, per version | `technique_id`, `tactics[]`, `deprecated`, `revoked_by`, `framework`, `framework_version` |
+| `framework_versions` | ingested release | `framework`, `version`, `released`, `source_url`, `bundle_sha256`, `ingested_at` |
+| `scan_results` | hayabusa run | `run_id`, `evtx_source`, `detections[]`, `observed_techniques[]`, `framework_version`, `created_at` |
+
+`platform` and `log_source` are `@property` on `Rule`, derived rather than stored, so the
+loader calls them explicitly — they are stored in Mongo because they are what an operator
+filters on ("which of these can fire without Sysmon?").
+
+### Indexes
+
+Eight declared, created idempotently on every connect by `mongo.ensure_indexes()`. Two
+carry the weight:
+
+- **`sigma_rules.techniques` is multikey.** The field holds an array and MongoDB indexes
+  every element separately, so "every rule covering T1003.003" is a key lookup rather than
+  a collection scan — `IXSCAN`, 34 keys examined for 34 documents returned.
+- **`attack_techniques (framework, framework_version, technique_id)` is unique over all
+  three fields.** That is what lets ATT&CK 18.1, ATT&CK 19.2 and ATLAS coexist. Unique on
+  `technique_id` alone would let a newer release silently overwrite an older one, which is
+  the exact failure this store exists to prevent. Historical retention is therefore
+  structural, not a convention someone has to remember.
+
+### Coverage, twice
+
+`kb.coverage()` walks the in-memory index in Python. `mongo.coverage()` pushes the same
+rollup into MongoDB as a `$facet` of three parallel pipelines. Both are kept, and a test
+asserts they return **equal** results across every filter combination — which is stronger
+evidence of data integrity than either implementation alone. `mongo.framework_coverage()`
+adds what a rule-side rollup structurally cannot: a `$lookup` walk of the *framework*, so
+it reports entries nothing detects.
+
+### Scan history
+
+With `HAYABUSA_MONGO_ENABLED=1`, `scan_evtx_attack` records each run in `scan_results`:
+the detections, the techniques observed, and the framework version they were scored
+against. That last field is what makes a stored run re-interpretable later — a scan judged
+under ATT&CK 19.2 can be joined back to 19.2's technique documents even after 20 lands.
+
+Persistence is deliberately subordinate to scanning. `mongo.persist_scan()` is a no-op when
+the flag is off, returns `None` when the container is down, and swallows its own write
+failures. A DFIR answer never fails because optional bookkeeping did. The stored detection
+list is also bounded (`MAX_STORED_DETECTIONS`, 5000) so a large case cannot breach the 16MB
+BSON document limit; the response reports `detections_truncated` when that bites.
+
+### Frameworks
+
+| Framework | `framework` value | Entries | Source |
+| --- | --- | --- | --- |
+| MITRE ATT&CK Enterprise | `enterprise-attack` | 858 (19.2), 835 (18.1) | STIX bundle from `mitre-attack/attack-stix-data` |
+| MITRE ATLAS | `atlas` | 197 (2026.08) | ATLAS's own `atlas_to_stix.py --include-attack` export |
+| OWASP LLM Top 10 | `owasp-llm-top-10` | 10 (2026) | `data/owasp_frameworks.yaml` |
+| OWASP Agentic Top 10 | `owasp-agentic-top-10` | 10 (2026) | `data/owasp_frameworks.yaml` |
+
+No Sigma rule maps to `LLM01`, so OWASP coverage reads as twenty gaps. That is an honest
+statement about what Windows EVTX can observe, not a broken query.
+
+### Comparing ATT&CK releases
+
+```bash
+uv run python scripts/diff_frameworks.py --list                    # published releases
+make diff-versions                                                 # 18.1 -> 19.2, ingesting both
+make diff-versions OLD=17.1 NEW=18.1
+```
+
+The report is not a changelog — it joins every change against `sigma_rules.techniques` and
+names the **affected rule ids**:
+
+```
+T1562.001 (Disable or Modify Tools) revoked, superseded by T1685 (Disable or Modify Tools).
+    10 rule(s) need remapping.
+```
+
+Four change classes are detected: added, removed, deprecated (`x_mitre_deprecated`) and
+revoked (`revoked` plus the `revoked-by` relationship, resolved to the successor's public
+id). Only *transitions* count — ATT&CK carries old deprecations forward forever, so
+standing flags are reported separately as carried-forward rather than re-announced every
+release.
+
 ## Updating rules & mappings
 
 ```bash
 make build-index    # re-parse rules after the corpus changes (e.g. after update_rules)
 make mappings       # regenerate mappings/attack.yaml from MITRE's ATT&CK STIX bundle
+make atlas-bundle   # build the combined ATLAS + ATT&CK STIX bundle (clones atlas-data)
 ```
 
-`mappings/attack.yaml` is generated but **committed**: the server never fetches ATT&CK at
-runtime, so answers stay reproducible and work offline. Don't hand-edit it.
+`mappings/attack.yaml` and `mappings/atlas.yaml` are generated but **committed**: the
+server never fetches at runtime, so answers stay reproducible and work offline. Don't
+hand-edit them. The downloaded STIX bundles themselves (~50MB each) are gitignored and
+cached under the system temp dir; every network call lives in `scripts/`, never in
+`src/`.
 
 Editing `rules/` needs no rebuild — that directory is re-scanned on every load.
 
 ## Development
 
 ```bash
-uv run pytest -m "not integration"   # 83 unit tests, ~5s — fake binary, no download
+uv run pytest -m "not integration"   # 136 unit tests — fake binary, no download
+uv run pytest -m "not integration and not mongo"   # 109 — no binary, no MongoDB
 uv run ruff check .                  # lint
 uv run ruff format .                 # format
 ```
 
-**93 tests total: 83 unit + 10 integration.** The integration tests need the real
-binary, sample logs, and a built index; they skip themselves otherwise:
+**146 tests total: 136 unit + 10 integration.** The integration tests need the real
+binary, sample logs, and a built index; they skip themselves otherwise. 27 of the unit
+tests need MongoDB and skip the same way — with the container stopped the suite is
+still green (109 passed, 27 skipped, 0 failed), which is how the "Mongo is additive"
+constraint is enforced rather than merely intended:
 
 ```bash
 make setup && ./scripts/fetch_samples.sh
-HAYABUSA_PATH=./hayabusa/hayabusa uv run pytest   # 93 tests, ~3m20s
+HAYABUSA_PATH=./hayabusa/hayabusa uv run pytest   # 146 tests
 ```
 
 `conftest.py` finds the binary via `HAYABUSA_PATH` → `./hayabusa/hayabusa` → `PATH`,

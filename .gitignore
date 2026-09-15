@@ -19,3 +19,8 @@ output/
 
 # Derived rule index
 .cache/
+
+# Downloaded STIX bundles — ~50MB each, regenerate with the scripts that use them
+*.stix.json
+enterprise-attack*.json
+stix-atlas*.json

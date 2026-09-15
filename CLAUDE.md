@@ -34,9 +34,20 @@ make build-index                       # parse rules -> .cache/rule_index.json (
 make mappings                          # regenerate mappings/attack.yaml from MITRE STIX
 ./scripts/fetch_samples.sh             # download sample .evtx into samples/ for e2e tests
 
+# MongoDB backing store (optional — the server works without it)
+make mongo-up                          # MongoDB 8.0 in Docker, named volume
+make load-mongo                        # ingest rule index + ATT&CK mappings
+make atlas-bundle && make load-atlas   # MITRE ATLAS
+make load-owasp                        # OWASP LLM + Agentic top-tens
+make diff-versions                     # ATT&CK 18.1 -> 19.2 with Sigma mapping impact
+make coverage-all                      # coverage across all four frameworks, one query
+make mongo-stats                       # counts, indexes, per-framework inventory
+make mongo-down
+
 # Run tests
-HAYABUSA_PATH=./hayabusa/hayabusa uv run pytest -v   # all 93 (83 unit + 10 integration), ~3m20s
-uv run pytest -m "not integration" -v                # 83 unit only, ~5s (no binary needed)
+HAYABUSA_PATH=./hayabusa/hayabusa uv run pytest -v   # all 146 (136 unit + 10 integration)
+uv run pytest -m "not integration" -v                # 136 unit only (no binary needed)
+uv run pytest -m "not integration and not mongo" -v  # 109, needs neither binary nor Mongo
 uv run pytest tests/test_kb.py tests/test_server_kb.py -v   # knowledge base (no binary)
 uv run pytest -m integration -v                      # 10 integration tests only, ~1m20s
 
@@ -70,12 +81,14 @@ After install, the binary is at `./hayabusa/hayabusa` (symlink to the versioned 
 
 ## Architecture
 
-Four layers — keep this separation when extending:
+Four layers — keep this separation when extending. Three further modules sit beside them
+(`stix.py`, `mongo.py`, `versions.py`); see **MongoDB backing store** below.
 
 - **`config.py`** — a single frozen `Config` loaded from env at import (`CONFIG`).
   Env vars: `HAYABUSA_PATH`, `HAYABUSA_TIMEOUT` (default 1800s), `HAYABUSA_WORKDIR`,
   `HAYABUSA_RULES_DIR` (os.pathsep-separated), `HAYABUSA_MAPPINGS_DIR`,
-  `HAYABUSA_INDEX_CACHE`, `HAYABUSA_TACTICS_FILE`.
+  `HAYABUSA_INDEX_CACHE`, `HAYABUSA_TACTICS_FILE`, `HAYABUSA_MONGO_URI`,
+  `HAYABUSA_MONGO_DB`, `HAYABUSA_MONGO_ENABLED`, `HAYABUSA_MONGO_TIMEOUT_MS`.
   Tests override by monkeypatching the module-level `CONFIG`; never read `os.environ` elsewhere.
   KB fields have repo-relative defaults so a `Config` can be built without them.
 
@@ -252,6 +265,10 @@ Two tiers, both run with `uv run pytest`:
     `ATTACK_YAML` / `TACTICS_TXT` / `write_rule()` there are reused by `test_server_kb.py`.
   - `tests/test_server_kb.py`: KB tools/resources, and the `scan_evtx_attack` join (the fake
     binary emits detections whose `RuleID`s match the fixture rules).
+  - `tests/test_versions.py`: STIX parsing and the four change classes, against synthetic
+    bundles built in-process — no network, no download, no database.
+  - `tests/test_mongo.py`: the backing store. The live ones are marked `mongo` and skip
+    when the container is stopped; the rest are pure functions.
 
 - **Integration tests** (`tests/integration/`): marked `@pytest.mark.integration`. Auto-skipped
   by `conftest.py` when `HAYABUSA_PATH` / `./hayabusa/hayabusa` / `hayabusa` on PATH is all
@@ -269,6 +286,100 @@ PATH) and exposes it via the `hayabusa_bin` session fixture.
 KB **unit** tests never touch the real corpus or `.cache/` — they monkeypatch `kb.CONFIG` at a
 `tmp_path`. Keep it that way, or the suite inherits the 150s parse. `test_samples.py` is the
 deliberate exception: it uses the real index, which is why it skips when that isn't built.
+
+## MongoDB backing store (`mongo.py`, `stix.py`, `versions.py`)
+
+**Additive, and that is non-negotiable.** `.cache/rule_index.json` is still what the server
+reads; Mongo holds the same data plus the axes the flat cache cannot express. Nothing in
+the server path touches Mongo unless `HAYABUSA_MONGO_ENABLED` is set. If `make test` breaks
+with the container stopped, the additive property has been violated — fix that, not the test.
+
+`mongo:8.0`, not `mongo:7` (what the build guide suggested) and not bare `mongo:8`. 8.0 is
+the current production/LTS series; bare `8` resolves to the 8.3 *rapid* release, superseded
+quarterly. Overridable as `MONGO_IMAGE` in the Makefile.
+
+### Four collections, created implicitly on first write
+
+There is no schema step and MongoDB enforces nothing — the application does. Document
+fields **mirror the `Rule` dataclass** (`techniques`, `tactics`, `level`, `source`); don't
+invent parallel names. `platform` and `log_source` are `@property` on `Rule`, so the loader
+calls them explicitly.
+
+`sigma_rules`, `attack_techniques`, `framework_versions`, `scan_results`. Shapes are in
+`mongo.py`'s docstrings and README.md.
+
+### The two indexes that carry the weight
+
+- **`sigma_rules.techniques` is multikey** — the field is an array, MongoDB indexes each
+  element, so a technique lookup is `IXSCAN` not `COLLSCAN`. Know the word "multikey".
+- **`attack_techniques (framework, framework_version, technique_id)` is unique over all
+  three.** This *is* historical retention. `load_techniques()` filters on all three fields,
+  so a write can only ever match a document of this framework at this version — ingesting
+  19.2 structurally cannot touch 18.1's documents. Unique on `technique_id` alone would let
+  a new release silently overwrite the old one. Don't weaken this index.
+
+### Coverage is implemented twice, on purpose
+
+`kb.coverage()` (Python, over the in-memory index) and `mongo.coverage()` (a `$facet`
+aggregation) must return **equal** results — `tests/test_mongo.py` asserts it across every
+filter combination. That equality is the store's strongest data-integrity evidence, so
+if you change one, change the other. Two subtleties the equality depends on:
+
+- kb.coverage keeps rules whose `level` is not in `LEVELS` whatever the floor, so
+  `_level_match()` has to as well (hence the `$nin` arm of the `$or`).
+- Techniques sort by count desc then id asc in both.
+
+`mongo.framework_coverage()` is the *other* direction — a `$lookup` walk of the framework —
+and reports entries nothing detects, which a rule-side rollup structurally cannot.
+`mongo.all_frameworks_coverage()` does every framework in one aggregation, each at its
+newest ingested version so two ATT&CK releases are not double-counted.
+
+### Scan persistence is the only thing on the server's Mongo path
+
+`scan_evtx_attack` calls `mongo.persist_scan()`, and that function is the **sole** consumer
+of `CONFIG.mongo_enabled` — flag off, it returns before opening a socket. It also swallows
+`MongoUnavailable` and any pymongo write error, on purpose: scanning is the product and
+scan history is bookkeeping, so a stopped container must degrade the record, never the
+answer. If you add another Mongo call to `server.py`, give it the same three properties
+(flag-gated, failure-swallowing, bounded) or the additive guarantee stops being true.
+
+Note the tool hands `persist_scan` **every** detection while returning only `max_results` to
+the caller — capping a payload must not cap the evidence.
+
+### One STIX parser, and why `require_source` exists
+
+`stix.parse_bundle()` is the only STIX reader; `build_attack_mappings.py`,
+`build_atlas_mappings.py` and `versions.py` all call it. **ATLAS's combined export carries
+both frameworks and cross-references ATT&CK ids on its own techniques** — `AML.T0000` also
+lists `T1596`. Parsed with the default id precedence, every ATLAS technique lands under an
+ATT&CK id and overwrites real ATT&CK documents. So ATLAS is read with
+`sources=("mitre-atlas",), require_source=True, collection="ATLAS"`. There are also two
+`x-mitre-collection` objects in that bundle, which is what `collection` selects between.
+
+### Version diffs count transitions, not standing flags
+
+ATT&CK carries deprecations forward forever (132 revoked ids stand in 19.2). Reporting
+every flagged id each release would bury the handful that actually moved, so `versions.diff`
+reports only old→new transitions and counts the rest as `carried_deprecated` /
+`carried_revoked`. Categories are mutually exclusive: presence decides first.
+
+Confirmed against real data: recent ATT&CK **never removes or newly deprecates** — it
+revokes. 16.1→17.1, 17.1→18.1 and 18.1→19.2 all show 0 removed and 0 newly deprecated. The
+four detectors are proven by synthetic-bundle unit tests, not by whichever pair was diffed.
+
+### Network boundary
+
+Every network call lives in `scripts/` (`attack_data.py`, `fetch_atlas_bundle.sh`, and
+ATLAS's own tool). `src/` reads files only — `stix.py` and `versions.py` take already-parsed
+dicts, which is also why they unit-test without a network or a database. Downloaded bundles
+(~50MB each) are gitignored and cached in the system temp dir; `mappings/*.yaml` are
+generated-and-committed.
+
+### Tests
+
+`@pytest.mark.mongo` + `conftest.py`'s session-start ping = auto-skip when the container is
+stopped. Live tests use a throwaway `hayabusa_test_<pid>` database and drop it after; never
+point them at the real `hayabusa` database.
 
 ## MCP server registration
 
@@ -320,4 +431,7 @@ Set `HAYABUSA_WORKDIR` to confine all path arguments to a specific case director
 - Do not use the Windows `.exe` build under WSL — WSL runs a real Linux kernel.
 - `.gitignore` excludes `*.evtx`, `*.csv`, `*.jsonl`, `output/`, `timelines/` — never commit
   evidence or timeline artifacts. It also excludes `hayabusa/` (third-party, `make setup`
-  fetches it) and `.cache/` (derived). `uv.lock` and `mappings/attack.yaml` *are* committed.
+  fetches it), `.cache/` (derived) and the downloaded STIX bundles (~50MB each).
+  `uv.lock`, `mappings/attack.yaml`, `mappings/atlas.yaml` and `data/owasp_frameworks.yaml`
+  *are* committed.
+- Docker Desktop provides the `docker` CLI inside WSL2; `make mongo-up` works unchanged.

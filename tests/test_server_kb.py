@@ -401,3 +401,37 @@ def test_scan_evtx_attack_rejects_bad_max_results(kb_server, tmp_path):
     evtx.write_text("")
     with pytest.raises(hayabusa.HayabusaError, match="max_results must be"):
         server.scan_evtx_attack(str(evtx), max_results=0)
+
+
+def test_scan_evtx_attack_persists_the_run_when_mongo_is_enabled(kb_server, tmp_path, monkeypatch):
+    """The scan/knowledge-base join is also where detection evidence enters the
+    data model. The tool offers every detection for storage, not just the page
+    it returns — truncating the caller's payload must not truncate the record."""
+    evtx = tmp_path / "a.evtx"
+    evtx.write_text("")
+    captured = {}
+
+    def fake_persist(report, *, evtx_source, **kwargs):
+        captured["report"] = report
+        captured["evtx_source"] = evtx_source
+        return {"run_id": "abc123", "detections_stored": len(report["detections"])}
+
+    monkeypatch.setattr(server.mongo, "persist_scan", fake_persist)
+
+    result = server.scan_evtx_attack(str(evtx), max_results=1)
+
+    assert result["run"] == {"run_id": "abc123", "detections_stored": 3}
+    assert result["returned"] == 1  # the caller's page is still capped...
+    assert len(captured["report"]["detections"]) == 3  # ...the evidence is not
+    assert captured["evtx_source"] == str(evtx.resolve())
+
+
+def test_scan_evtx_attack_reports_nothing_extra_when_persistence_is_off(kb_server, tmp_path):
+    """The default path: no 'run' key, and the scan is unaffected."""
+    evtx = tmp_path / "a.evtx"
+    evtx.write_text("")
+
+    result = server.scan_evtx_attack(str(evtx))
+
+    assert "run" not in result
+    assert result["total"] == 3

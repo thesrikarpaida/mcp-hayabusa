@@ -22,7 +22,7 @@ from pathlib import Path
 
 from mcp.server.fastmcp import FastMCP
 
-from . import kb
+from . import kb, mongo
 from .hayabusa import HayabusaError, input_flag, run, safe_path
 
 mcp = FastMCP("hayabusa")
@@ -678,7 +678,7 @@ def scan_evtx_attack(
         {"id": tid, "name": kb.technique_name(tid, meta), "detections": count}
         for tid, count in sorted(per_tech.items(), key=lambda kv: (-kv[1], kv[0]))
     ]
-    return {
+    report = {
         "total": scan["total"],
         "counts": scan["counts"],
         "techniques_observed": techniques,
@@ -687,6 +687,19 @@ def scan_evtx_attack(
         "returned": len(annotated[:max_results] if max_results else annotated),
         "detections": annotated[:max_results] if max_results else annotated,
     }
+
+    # Record the run in MongoDB when the optional backing store is switched on,
+    # so scan history is queryable alongside the frameworks it was scored
+    # against. Every detection is offered for storage, not just the page
+    # returned here — truncating the caller's payload must not truncate the
+    # evidence. persist_scan() is a no-op when disabled and swallows its own
+    # failures: bookkeeping never breaks a scan.
+    stored = mongo.persist_scan(
+        {**report, "detections": annotated}, evtx_source=str(safe_path(input_path))
+    )
+    if stored:
+        report["run"] = stored
+    return report
 
 
 def main() -> None:

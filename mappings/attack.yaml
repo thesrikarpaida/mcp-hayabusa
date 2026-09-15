@@ -1,6 +1,7 @@
 _generated_by: scripts/build_attack_mappings.py
 _source: https://raw.githubusercontent.com/mitre-attack/attack-stix-data/master/enterprise-attack/enterprise-attack.json
 _spec_version: ''
+_attack_version: '19.2'
 _note: Generated file — do not hand-edit; re-run the script to refresh. The MCP server reads this offline
   and never fetches ATT&CK at runtime.
 tactics:
