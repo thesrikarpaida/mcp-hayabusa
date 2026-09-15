@@ -16,6 +16,7 @@ back to the rule that fired it to report which ATT&CK techniques were observed.
 from __future__ import annotations
 
 import json
+import re
 import tempfile
 from collections.abc import Iterable
 from pathlib import Path
@@ -33,6 +34,22 @@ mcp = FastMCP("hayabusa")
 # -q / --quiet      suppresses the ASCII art banner.
 # -N / --no-summary suppresses the results summary table for cleaner output.
 _SCAN_BASE = ["-w", "-q", "-N"]
+
+# Reporting subcommands (logon-summary, eid-metrics, search) have no rule wizard
+# and no results summary, so they reject -w and -N — passing _SCAN_BASE makes
+# hayabusa exit 2. They return stdout straight to the caller, so -K strips the
+# ANSI colour codes that would otherwise land in the response.
+_REPORT_BASE = ["-q", "-K"]
+
+# -K misses some resets, so strip what is left. The scanning tools are
+# unaffected: their JSONL goes to a file, never through stdout.
+_ANSI_RE = re.compile(r"\x1b\[[0-9;]*[A-Za-z]")
+
+
+def _plain(text: str) -> str:
+    """Strip ANSI escapes from hayabusa stdout returned verbatim to the caller."""
+    return _ANSI_RE.sub("", text).strip()
+
 
 # Hayabusa alert levels and Sigma rule levels are the same vocabulary, lowest
 # to highest; kb.LEVELS is the single definition.
@@ -57,13 +74,13 @@ def version() -> str:
 @mcp.tool()
 def list_profiles() -> str:
     """List the available output profiles (minimal, standard, verbose, all-field-info, ...)."""
-    return run(["list-profiles"]).stdout.strip()
+    return _plain(run(["list-profiles", *_REPORT_BASE]).stdout)
 
 
 @mcp.tool()
 def update_rules() -> str:
     """Update the bundled Sigma detection rules from the Hayabusa rules repo."""
-    return run(["update-rules"]).stdout.strip()
+    return _plain(run(["update-rules"]).stdout)
 
 
 @mcp.tool()
@@ -100,7 +117,7 @@ def csv_timeline(
     if utc:
         args.append("--UTC")
     result = run(args)
-    return {"output": str(out), "log": result.stdout.strip()}
+    return {"output": str(out), "log": _plain(result.stdout)}
 
 
 @mcp.tool()
@@ -137,7 +154,7 @@ def json_timeline(
     if jsonl:
         args.append("--JSONL-output")
     result = run(args)
-    return {"output": str(out), "log": result.stdout.strip()}
+    return {"output": str(out), "log": _plain(result.stdout)}
 
 
 _SUMMARY_FIELDS = ("Timestamp", "RuleTitle", "Level", "Computer", "Channel", "EventID", "Details")
@@ -244,14 +261,14 @@ def _parse_jsonl(path: Path) -> list[dict]:
 def logon_summary(input_path: str) -> str:
     """Summarize successful and failed logon events across the EVTX logs."""
     src = safe_path(input_path)
-    return run(["logon-summary", *input_flag(src), *_SCAN_BASE]).stdout.strip()
+    return _plain(run(["logon-summary", *input_flag(src), *_REPORT_BASE]).stdout)
 
 
 @mcp.tool()
 def metrics(input_path: str) -> str:
     """Report event-ID frequency metrics across the EVTX logs (channel/EID counts)."""
     src = safe_path(input_path)
-    return run(["eid-metrics", *input_flag(src), *_SCAN_BASE]).stdout.strip()
+    return _plain(run(["eid-metrics", *input_flag(src), *_REPORT_BASE]).stdout)
 
 
 @mcp.tool()
@@ -264,8 +281,8 @@ def search(input_path: str, keyword: str = "", regex: str = "") -> dict:
         raise HayabusaError("provide exactly one of 'keyword' or 'regex'")
     src = safe_path(input_path)
     selector = ["-k", keyword] if keyword else ["-r", regex]
-    result = run(["search", *input_flag(src), *selector, *_SCAN_BASE])
-    return {"matches": result.stdout.strip()}
+    result = run(["search", *input_flag(src), *selector, *_REPORT_BASE])
+    return {"matches": _plain(result.stdout)}
 
 
 # --------------------------------------------------------------------------
@@ -602,6 +619,69 @@ def coverage_gaps(tactic: str = "", limit: int = 50) -> dict:
         ),
         "gaps": gaps[:limit],
     }
+
+
+# The only read path to MongoDB in the server, and it keeps the same three
+# properties as persist_scan: flag-gated, failure-swallowing, bounded. Mongo
+# stays additive — with the flag off or the container stopped this returns an
+# explanatory dict, never an error, and no other tool changes behaviour.
+@mcp.tool()
+def framework_coverage(framework: str = "", limit: int = 25) -> dict:
+    """Coverage of a whole security framework, including entries nothing detects.
+
+    Unlike ``attack_coverage``, which rolls up the rules' own tags, this walks
+    the *framework* and asks how many rules reach each entry — so it reports
+    gaps a rule-side rollup structurally cannot see. It is also the only way to
+    query the non-ATT&CK frameworks: MITRE ATLAS and the two OWASP top-tens.
+
+    Requires the optional MongoDB store (``make mongo-up && make load-mongo``)
+    and ``HAYABUSA_MONGO_ENABLED=1``. Without either it returns a dict
+    explaining what to start rather than failing.
+
+    Args:
+        framework: One of ``enterprise-attack``, ``atlas``, ``owasp-llm-top-10``,
+            ``owasp-agentic-top-10``. Omit to report every ingested framework at
+            its newest version in a single aggregation.
+        limit: Maximum entries listed per framework. Counts always describe all
+            of them.
+
+    Returns:
+        For one framework: entry counts, per-tactic rollup, and the entries
+        themselves, most-covered first. For all: one summary per framework.
+        On an unavailable store: ``{"available": false, "reason": ..., "hint": ...}``.
+    """
+    if limit < 1:
+        raise HayabusaError(f"limit must be a positive integer, got {limit!r}")
+    if not mongo.CONFIG.mongo_enabled:
+        return {
+            "available": False,
+            "reason": "HAYABUSA_MONGO_ENABLED is not set",
+            "hint": (
+                "Framework coverage needs the optional MongoDB store. Set "
+                "HAYABUSA_MONGO_ENABLED=1 and run: make mongo-up && make load-mongo "
+                "(plus make load-atlas / make load-owasp for the AI frameworks)."
+            ),
+        }
+    try:
+        db = mongo.connect()
+        known = mongo.frameworks(db)
+        if framework and framework not in known:
+            return {
+                "available": True,
+                "error": f"unknown framework {framework!r}",
+                "known_frameworks": known,
+            }
+        if framework:
+            return mongo.framework_coverage(db, framework=framework, limit=limit)
+        report = mongo.all_frameworks_coverage(db)
+        report["known_frameworks"] = known
+        return report
+    except mongo.MongoUnavailable as exc:
+        return {
+            "available": False,
+            "reason": str(exc),
+            "hint": "MongoDB is not reachable. Start it with: make mongo-up",
+        }
 
 
 @mcp.tool()

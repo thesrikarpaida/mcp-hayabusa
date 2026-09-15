@@ -20,8 +20,9 @@ import os
 import pytest
 import yaml
 
-from mcp_hayabusa import kb, mongo
+from mcp_hayabusa import kb, mongo, server
 from mcp_hayabusa.config import Config
+from mcp_hayabusa.hayabusa import HayabusaError
 from tests.test_kb import ATTACK_YAML, TACTICS_TXT, write_rule
 
 pymongo = pytest.importorskip("pymongo")
@@ -148,6 +149,66 @@ def test_connect_to_a_dead_server_raises_mongo_unavailable():
 
 def test_available_is_false_rather_than_raising():
     assert mongo.available("mongodb://127.0.0.1:1/", "nope") is False
+
+
+# --------------------------------------------------------------------------
+# framework_coverage: the server's only Mongo *read* path.
+#
+# It must keep the additive guarantee — with the flag off, or the container
+# stopped, it explains itself instead of raising, and no other tool changes.
+# --------------------------------------------------------------------------
+
+
+def _mongo_cfg(*, enabled: bool) -> Config:
+    """A Config that differs from the default only in the Mongo opt-in flag."""
+    return Config(binary="hayabusa", timeout=30.0, workdir="", mongo_enabled=enabled)
+
+
+def test_framework_coverage_is_inert_when_the_flag_is_off(monkeypatch):
+    monkeypatch.setattr(mongo, "CONFIG", _mongo_cfg(enabled=False))
+    result = server.framework_coverage()
+    assert result["available"] is False
+    assert "HAYABUSA_MONGO_ENABLED" in result["reason"]
+    assert "make mongo-up" in result["hint"]
+
+
+def test_framework_coverage_opens_no_socket_when_the_flag_is_off(monkeypatch):
+    """Flag-gated means gated *before* the connection, not after it fails."""
+
+    def explode(*args, **kwargs):  # pragma: no cover - must never run
+        raise AssertionError("connect() called with the flag off")
+
+    monkeypatch.setattr(mongo, "CONFIG", _mongo_cfg(enabled=False))
+    monkeypatch.setattr(mongo, "connect", explode)
+    assert server.framework_coverage()["available"] is False
+
+
+def test_framework_coverage_reports_a_stopped_container_without_raising(monkeypatch):
+    monkeypatch.setattr(mongo, "CONFIG", _mongo_cfg(enabled=True))
+
+    def unavailable(*args, **kwargs):
+        raise mongo.MongoUnavailable("connection refused")
+
+    monkeypatch.setattr(mongo, "connect", unavailable)
+    result = server.framework_coverage()
+    assert result["available"] is False
+    assert "connection refused" in result["reason"]
+
+
+def test_framework_coverage_rejects_a_bad_limit(monkeypatch):
+    monkeypatch.setattr(mongo, "CONFIG", _mongo_cfg(enabled=True))
+    with pytest.raises(HayabusaError):
+        server.framework_coverage(limit=0)
+
+
+@pytest.mark.mongo
+def test_framework_coverage_names_unknown_frameworks(monkeypatch, mongo_db):
+    monkeypatch.setattr(mongo, "CONFIG", _mongo_cfg(enabled=True))
+    monkeypatch.setattr(mongo, "connect", lambda *a, **k: mongo_db)
+    result = server.framework_coverage(framework="not-a-framework")
+    assert result["available"] is True
+    assert "unknown framework" in result["error"]
+    assert "known_frameworks" in result
 
 
 # --------------------------------------------------------------------------

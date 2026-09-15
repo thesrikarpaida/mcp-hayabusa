@@ -16,63 +16,104 @@ actually observed.
 > **Defensive / authorized use.** This wraps a forensics tool. Point it only at
 > event logs you are authorized to analyze.
 
-## Quickstart
+## Before you start
 
-```bash
-git clone https://github.com/thesrikarpaida/mcp-hayabusa.git && cd mcp-hayabusa
-make setup          # deps + hayabusa binary + rule index (~3-4 min)
-```
+Two things to check, because `make setup` cannot work around either:
 
-Then open the repo in Claude Code and approve the `hayabusa` server when prompted —
-`.mcp.json` is committed and needs no editing. Confirm it works by asking for
-`detection://rules`, or from a shell:
-
-```bash
-claude mcp list                      # hayabusa: connected
-uv run pytest -m "not integration"   # 136 unit tests, no binary needed
-```
-
-Full detail in [Register with Claude Code](#register-with-claude-code) below.
-
-## Prerequisites
-
-- **Linux x64**, or **WSL2** on Windows. The installer fetches a Linux x64 Hayabusa
-  build only, so `make setup` does **not** work on native Windows or macOS — Windows
-  users should run everything inside WSL2. Hayabusa itself ships `win-x64` and `mac-*`
-  builds; to use one, download it from
-  [Hayabusa's releases](https://github.com/Yamato-Security/hayabusa/releases) and point
-  `HAYABUSA_PATH` at it (the knowledge base is pure Python and runs on any OS regardless).
-- **Python 3.10+** and [`uv`](https://docs.astral.sh/uv/). `uv` is the only thing you
-  strictly need to install by hand — it can bootstrap Python for you (`uv python install`).
-  No `uv`? Plain `pip` works too (see [Without `make` / `uv`](#install) below); it reads
-  the same `pyproject.toml`.
-
-`make setup` downloads the Hayabusa binary for you (`scripts/install_hayabusa.sh` detects
-your glibc version and picks the `gnu` or `musl` build accordingly).
-
-## Install
-
-```bash
-make setup          # deps + hayabusa binary + rule index (recommended)
-```
-
-`make setup` ends by building the rule index, which takes **2–3 minutes** — it parses
-every Sigma rule once so the server can answer instantly afterwards. Without it, the
-first knowledge-base call pays that cost instead.
+| Requirement | Why |
+| --- | --- |
+| **Linux x64, or WSL2 on Windows** | The installer fetches a Linux x64 Hayabusa build only. `make setup` does **not** work on native Windows or macOS. |
+| **[`uv`](https://docs.astral.sh/uv/)** | The only thing you must install by hand. It bootstraps Python for you (`uv python install`), so Python 3.10+ is not a separate step. |
 
 <details>
-<summary>Without <code>make</code> / <code>uv</code> (plain pip)</summary>
+<summary>On macOS or native Windows, or you'd rather use <code>pip</code></summary>
+
+The knowledge base is pure Python and runs anywhere — only the *scanning* half needs
+the binary. Download a `win-x64` or `mac-*` build from
+[Hayabusa's releases](https://github.com/Yamato-Security/hayabusa/releases) and point
+`HAYABUSA_PATH` at it.
 
 `pip` reads `pyproject.toml` directly — no `uv`, no `requirements.txt`:
 
 ```bash
-pip install -e ".[dev]"                                            # deps + the mcp-hayabusa entry point
-./scripts/install_hayabusa.sh                                      # fetch the Hayabusa binary (Linux x64)
+pip install -e ".[dev]"                                               # deps + the mcp-hayabusa entry point
+./scripts/install_hayabusa.sh                                         # fetch the binary (Linux x64)
 python -c "from mcp_hayabusa import kb; kb.load_index(rebuild=True)"  # build the rule index
 ```
 
-Note `pip` won't install a Python interpreter for you the way `uv` does — you need
-Python 3.10+ already on `PATH`.
+Unlike `uv`, `pip` won't install an interpreter for you — you need Python 3.10+ on `PATH`.
+</details>
+
+## Setup
+
+```bash
+git clone https://github.com/thesrikarpaida/mcp-hayabusa.git && cd mcp-hayabusa
+make setup                  # deps + hayabusa binary + rule index  (~3-4 min)
+./scripts/fetch_samples.sh  # optional: sample EVTX, so you have something to scan
+```
+
+`make setup` ends by building the rule index, which is most of that time — it parses
+every Sigma rule once so the server answers instantly afterwards. Skip it and the first
+knowledge-base call pays the cost instead.
+
+`scripts/install_hayabusa.sh` detects your glibc version and picks the right build:
+`gnu` for glibc ≥ 2.38, `musl` below that (which covers Ubuntu 22.04 and WSL2 on
+Windows 11). The musl build is statically linked and runs anywhere on Linux x64.
+
+## Verify it works
+
+Before wiring up an MCP client, confirm the two halves independently:
+
+```bash
+# 1. The knowledge base — no binary needed. Expect 4,965 rules across 3 dirs.
+uv run python -c "from mcp_hayabusa import kb; i = kb.load_index(); \
+print(len(i.rules), 'rules'); [print(' ', n) for n in i.notes]"
+
+# 2. The scanner — expect "Hayabusa v3.10.0 - ..."
+HAYABUSA_PATH=./hayabusa/hayabusa uv run python -c \
+  "from mcp_hayabusa.server import version; print(version())"
+
+# 3. Both together, on a real log. Expect total 5, unmapped_detections 0.
+HAYABUSA_PATH=./hayabusa/hayabusa uv run python -c \
+  "from mcp_hayabusa.server import scan_evtx_attack as s; \
+r = s('./samples/Powershell-Invoke-Obfuscation-string-menu.evtx', min_level='informational'); \
+print(r['total'], 'detections,', r['unmapped_detections'], 'unmapped'); \
+print(r['techniques_observed'])"
+```
+
+Step 3 is the one that matters: `unmapped_detections: 0` proves the scanner, the rule
+index and the ATT&CK mappings all agree. Anything above zero means a stale cache.
+
+Then open the repo in Claude Code and approve the `hayabusa` server when prompted.
+`.mcp.json` is committed and needs no editing — details in
+[Register with Claude Code](#register-with-claude-code).
+
+```bash
+claude mcp list        # hayabusa: connected  ("Pending approval" on first use is expected)
+```
+
+## Troubleshooting
+
+| Symptom | Cause | Fix |
+| --- | --- | --- |
+| A scan hangs forever, no output | The rule-selection wizard is waiting on stdin | Every scanning subcommand needs `-w`. If you added a tool, include `_SCAN_BASE`. |
+| `error: unexpected argument '-w' found` | `logon-summary`, `eid-metrics` and `search` have no wizard and reject `-w`/`-N` | Use `_REPORT_BASE`, not `_SCAN_BASE`. |
+| `unmapped_detections` > 0 | Stale index — a rule fired that isn't in the cache | `make build-index` |
+| KB tools return only 2 rules | `hayabusa/` isn't downloaded yet; you're seeing just `rules/` | `make setup` |
+| `version` fails with "no such file" | `HAYABUSA_PATH` unset and no binary on `PATH` | `make install-hayabusa`, or set `HAYABUSA_PATH` |
+| Binary won't run: `GLIBC_2.38 not found` | glibc too old for the `gnu` build | Re-run `./scripts/install_hayabusa.sh` — it picks `musl` automatically |
+| Integration tests all skip | No binary, or samples not fetched | `make setup && ./scripts/fetch_samples.sh` |
+| 27 tests skip | MongoDB isn't running. **This is correct** — the store is optional | `make mongo-up` only if you want it |
+| A rule you expect never fires | It may be `deprecated`, `unsupported` or `noisy` (disabled by default), or filtered out because its channel isn't in the EVTX | Check the `log` field from `json_timeline` |
+
+<details>
+<summary>Without <code>make</code> (the individual steps)</summary>
+
+```bash
+uv sync --extra dev      # install Python deps into .venv
+make install-hayabusa    # download the Hayabusa binary to ./hayabusa/
+make build-index         # parse rules -> .cache/rule_index.json (~2-3 min)
+```
 </details>
 
 ## Layout
@@ -206,22 +247,29 @@ the environment on `PATH` (`uv sync --extra dev` puts it in `.venv/bin/`). `uv r
 avoids that entirely, which is why it's the default above.
 </details>
 
-## Scanning tools
+## Tools
+
+> **📖 [`docs/TOOLS.md`](docs/TOOLS.md) is the full reference** — every tool with its
+> parameters, an example call, and its real captured output.
+
+### Scanning tools
+
+Need the Hayabusa binary.
 
 | Tool             | Hayabusa subcommand | Purpose                                       |
 | ---------------- | ------------------- | --------------------------------------------- |
-| `version`        | `help`               | Report installed version (v3.10+ has no `--version` flag; parsed from the banner). |
-| `list_profiles`  | `list-profiles`     | List output profiles.                         |
-| `update_rules`   | `update-rules`      | Pull latest Sigma rules. **Run `make build-index` afterwards** so the KB sees them. |
-| `scan_evtx`      | `json-timeline`     | Primary triage tool — scans with Sigma rules and returns structured detections inline. See below. |
-| `scan_evtx_attack` | `json-timeline`   | Scan **and** report which ATT&CK techniques were observed. See below. |
+| `scan_evtx`      | `json-timeline`     | Primary triage tool — scans with Sigma rules and returns structured detections inline. |
+| `scan_evtx_attack` | `json-timeline`   | Scan **and** report which ATT&CK techniques were observed. |
 | `csv_timeline`   | `csv-timeline`      | Build a CSV detection timeline.               |
 | `json_timeline`  | `json-timeline`     | Build a JSON/JSONL detection timeline.        |
 | `logon_summary`  | `logon-summary`     | Summarize logon successes/failures.           |
-| `metrics`        | `eid-metrics`       | Event-ID frequency metrics.                   |
+| `metrics`        | `eid-metrics`       | Event-ID frequency metrics. Run this first on unfamiliar evidence. |
 | `search`         | `search`            | Keyword/regex search of raw records.          |
+| `version`        | `help`              | Report installed version (v3.10+ has no `--version` flag; parsed from the banner). |
+| `list_profiles`  | `list-profiles`     | List output profiles.                         |
+| `update_rules`   | `update-rules`      | Pull latest Sigma rules. **Run `make build-index` afterwards** so the KB sees them. |
 
-## Knowledge base tools
+### Knowledge base tools
 
 No Hayabusa binary required.
 
@@ -232,7 +280,52 @@ No Hayabusa binary required.
 | `attack_coverage`    | Rules per ATT&CK technique and tactic; filter by tactic/min level.   |
 | `technique_coverage` | Assess one technique: `covered`, `partial`, or `gap`, with reasons.  |
 | `coverage_gaps`      | Techniques with no rule at all.                                     |
+| `framework_coverage` | Coverage of a whole framework — ATT&CK, **ATLAS**, or the **OWASP** top-tens — including entries nothing detects. Needs the optional MongoDB store. |
 | `rebuild_rule_index` | Re-parse every rule and refresh the cache (slow; after `update_rules`). |
+
+### Three worked examples
+
+**Triage an unknown EVTX.** `metrics` first — it tells you which channels exist, and
+therefore which rules can fire at all:
+
+```json
+// metrics
+{"input_path": "./samples/metasploit-psexec-native-target-security.evtx"}
+```
+```
+│ 3     ┆ 75.0% ┆ Sec     ┆ 4688 ┆ Process created   │
+│ 1     ┆ 25.0% ┆ Sec     ┆ 1102 ┆ Audit log cleared │
+```
+
+**Scan and map to ATT&CK.** The number to read is `unmapped_detections`:
+
+```json
+// scan_evtx_attack
+{"input_path": "./samples/", "min_level": "informational"}
+```
+```json
+{"total": 5, "counts": {"info": 4, "high": 1},
+ "techniques_observed": [{"id": "T1059.001", "name": "...PowerShell", "detections": 1}],
+ "unmapped_detections": 0}
+```
+
+**Ask what you can detect.** Every rule-returning tool includes a `breakdown` computed
+over *all* matches, never just the returned page:
+
+```json
+// search_rules
+{"technique": "T1490", "limit": 3}
+```
+```json
+{"matched": 38, "returned": 3, "truncated": true,
+ "breakdown": {"total": 38, "distinct_detections": 23,
+   "by_severity": {"critical": 6, "high": 21, "medium": 10, "low": 1},
+   "by_platform": {"sigma/sysmon": 20, "sigma/builtin": 18}}}
+```
+
+Read `distinct_detections`, not `total` — the corpus mirrors most rules across parallel
+`sysmon/` and `builtin/` trees, so totals double-count. And `by_platform` says how much
+of the count is real: a `*/sysmon` rule is inert on evidence collected without Sysmon.
 
 ## Resources
 
@@ -262,38 +355,14 @@ Linux-only and simply unobservable in Windows event logs.
 Rules citing an ATT&CK-revoked technique (`T1086` → `T1059.001`) are flagged with a
 `warning` so they can be retagged.
 
-### `scan_evtx` parameters
+### Tool parameters and output
 
-| Parameter       | Default     | Purpose                                                                 |
-| --------------- | ----------- | ------------------------------------------------------------------------ |
-| `input_path`    | *(required)*| A single `.evtx` file or a directory of them.                          |
-| `min_level`     | `"low"`     | Lowest alert level to include: `informational`\|`low`\|`medium`\|`high`\|`critical`. |
-| `profile`       | `"standard"`| Output profile: `minimal`\|`standard`\|`verbose`\|`all-field-info`.     |
-| `rule_filter`   | *(none)*    | Only keep detections whose rule title contains this substring (case-insensitive), e.g. `"lateral"` or `"mimikatz"`. Hayabusa has no native rule-title filter, so this is applied after scanning. |
-| `output_format` | `"summary"` | `"summary"` returns a handful of key fields per detection; `"full"` returns the entire parsed record. |
-| `max_results`   | *(none)*    | Caps the number of detections returned. `total`/`counts` in the response still reflect all matches (after `rule_filter`, before truncation); `returned` gives the actual count in `detections`. |
-
-### `scan_evtx_attack`
-
-Scans, then joins every detection back to the Sigma rule that fired it (by rule id)
-and rolls the results up by ATT&CK technique and tactic:
-
-```json
-{
-  "total": 41,
-  "counts": {"high": 12, "low": 29},
-  "techniques_observed": [
-    {"id": "T1003.001", "name": "OS Credential Dumping: LSASS Memory", "detections": 7}
-  ],
-  "tactics_observed": {"credential-access": 7, "execution": 3},
-  "unmapped_detections": 0,
-  "detections": [{"RuleTitle": "...", "techniques": ["T1003.001"], "...": "..."}]
-}
-```
-
-`unmapped_detections` counts hits whose rule id isn't in the index — usually a stale
-cache, so run `make build-index`. `max_results` (default 100) caps `detections`; the
-rollup always covers every hit.
+Full parameter tables and real captured output for all sixteen tools are in
+**[`docs/TOOLS.md`](docs/TOOLS.md)** — including the two that repay a close read:
+[`scan_evtx`](docs/TOOLS.md#scan_evtx) (the `rule_filter` / `max_results` interaction,
+and why `counts` says `med` when you asked for `medium`) and
+[`scan_evtx_attack`](docs/TOOLS.md#scan_evtx_attack) (why it forces `profile=standard`,
+and what `unmapped_detections` is telling you).
 
 ## MongoDB backing store (optional)
 
