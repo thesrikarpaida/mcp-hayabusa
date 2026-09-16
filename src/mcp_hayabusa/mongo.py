@@ -248,9 +248,37 @@ def technique_document(
         # None rather than "" so `{"revoked_by": {"$ne": None}}` reads naturally.
         "revoked_by": entry.get("superseded_by") or entry.get("revoked_by") or None,
         "url": str(entry.get("url") or ""),
+        # Ids of this entry's counterparts in another framework — the 44 ATT&CK
+        # techniques MITRE adopted into ATLAS. Empty for ATT&CK itself. This is
+        # what lets framework_coverage() resolve an ATLAS entry through the
+        # rules detecting its conventional analogue instead of reading as a gap.
+        "cross_refs": list(entry.get("cross_refs") or []),
         "framework": framework,
         "framework_version": framework_version,
     }
+
+
+def _subtechnique_expander(db: Database):
+    """Return a function widening parent technique ids to the ids rules use.
+
+    ATLAS cites ``T1059``; the rule that actually fires tags ``T1059.001``. An
+    exact join would miss it, so a parent is widened to every sub-technique id
+    the corpus actually cites. Read from ``sigma_rules`` rather than from ATT&CK
+    so the expansion only ever names ids a rule could match — an ATT&CK
+    sub-technique nothing detects adds nothing but noise.
+    """
+    known = {str(t).upper() for t in db[SIGMA_RULES].distinct("techniques") if t}
+
+    def expand(refs: Iterable[str]) -> list[str]:
+        out: set[str] = set()
+        for ref in refs:
+            rid = str(ref).upper()
+            out.add(rid)
+            if "." not in rid:
+                out.update(k for k in known if k.startswith(rid + "."))
+        return sorted(out)
+
+    return expand
 
 
 def load_techniques(
@@ -269,11 +297,19 @@ def load_techniques(
     which makes a repeat run idempotent rather than a duplicate-key crash.
     """
     pymongo = _pymongo()
+    expand = _subtechnique_expander(db)
     ops = []
     for entry in entries:
         doc = technique_document(entry, framework=framework, framework_version=framework_version)
         if not doc["technique_id"]:
             continue
+        # A cross-reference names a parent (ATLAS cites T1059) while the rules
+        # that fire tag a child (T1059.001). Expand here, at ingest, so the
+        # $lookup stays an exact multikey join instead of a per-entry prefix
+        # scan — and so this agrees with kb.observed_atlas, which walks parents
+        # in Python. The two must return the same set or the bridge is lying.
+        if doc["cross_refs"]:
+            doc["cross_refs"] = expand(doc["cross_refs"])
         ops.append(
             pymongo.ReplaceOne(
                 {
@@ -577,10 +613,21 @@ def framework_coverage(
 
     pipeline: list[dict] = [
         {"$match": match},
+        # Join on the entry's own id *and* any cross-referenced id. For ATT&CK
+        # cross_refs is empty, so this is the plain direct join it always was;
+        # for ATLAS it is what turns 197 gaps into real inherited coverage.
+        # $concatArrays keeps it one lookup rather than two passes.
+        {
+            "$addFields": {
+                "_join_ids": {
+                    "$concatArrays": [["$technique_id"], {"$ifNull": ["$cross_refs", []]}]
+                }
+            }
+        },
         {
             "$lookup": {
                 "from": SIGMA_RULES,
-                "localField": "technique_id",
+                "localField": "_join_ids",
                 "foreignField": "techniques",
                 "as": "matched",
             }
@@ -592,6 +639,7 @@ def framework_coverage(
                 "name": 1,
                 "tactics": 1,
                 "is_subtechnique": 1,
+                "cross_refs": {"$ifNull": ["$cross_refs", []]},
                 "rules": {"$size": "$matched"},
             }
         },
@@ -605,12 +653,20 @@ def framework_coverage(
         for tac in row.get("tactics") or []:
             per_tactic[tac] = per_tactic.get(tac, 0) + 1
 
+    inherited = [r for r in covered if r.get("cross_refs")]
     report = {
         "framework": framework,
         "framework_version": version,
         "entries_total": len(rows),
         "entries_covered": len(covered),
         "entries_gap": len(rows) - len(covered),
+        "entries_covered_by_cross_reference": len(inherited),
+        "coverage_basis": (
+            "inherited from the ATT&CK techniques this framework adopted; "
+            "conventional tradecraft against an AI target, not AI-specific detection"
+        )
+        if inherited
+        else "rules citing the entry directly",
         "rules_mapped": sum(r["rules"] for r in covered),
         "tactics": dict(sorted(per_tactic.items(), key=lambda kv: -kv[1])),
         "entries": rows[:limit] if limit else rows,

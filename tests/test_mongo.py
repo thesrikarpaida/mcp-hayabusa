@@ -728,3 +728,102 @@ def test_all_frameworks_coverage_on_an_empty_store(mongo_db):
         "entries_covered": 0,
         "entries_gap": 0,
     }
+
+
+# --------------------------------------------------------------------------
+# The ATLAS bridge.
+#
+# MITRE adopted 44 ATT&CK techniques into the ATLAS matrix and kept their ids.
+# Following that reference lets an ATLAS entry inherit coverage instead of
+# reading as a gap. Two implementations walk it — kb.observed_atlas in Python
+# and framework_coverage's $lookup — and they must agree, for the same reason
+# kb.coverage and mongo.coverage must.
+# --------------------------------------------------------------------------
+
+
+def test_subtechnique_expander_widens_parents_to_ids_rules_actually_use():
+    class FakeRules:
+        def distinct(self, _field):
+            return ["T1059.001", "T1059.003", "T1003.001", "T1190"]
+
+    class FakeDB:
+        def __getitem__(self, _name):
+            return FakeRules()
+
+    expand = mongo._subtechnique_expander(FakeDB())
+    # A parent widens to the sub-technique ids the corpus cites, and keeps itself.
+    assert expand(["T1059"]) == ["T1059", "T1059.001", "T1059.003"]
+    # An id that is already a sub-technique is left alone.
+    assert expand(["T1003.001"]) == ["T1003.001"]
+    # A parent nothing detects still survives as itself.
+    assert expand(["T1566"]) == ["T1566"]
+
+
+def test_technique_document_carries_cross_refs():
+    doc = mongo.technique_document(
+        {"name": "Command and Scripting Interpreter", "cross_refs": ["T1059"]},
+        framework="atlas",
+        framework_version="2026.09",
+        technique_id="AML.T0050",
+    )
+    assert doc["cross_refs"] == ["T1059"]
+    # ATT&CK entries have none, so the join stays the direct one it always was.
+    plain = mongo.technique_document(
+        {"name": "PowerShell"},
+        framework="enterprise-attack",
+        framework_version="19.2",
+        technique_id="T1059.001",
+    )
+    assert plain["cross_refs"] == []
+
+
+@pytest.mark.mongo
+def test_cross_reference_join_equals_the_python_walk(mongo_db, corpus):
+    """The bridge's two implementations must return the same covered set."""
+    index, _ = corpus
+    mongo.load_rules(mongo_db, index, framework_version="19.2")
+
+    # Two synthetic ATLAS entries: one adopting a parent whose sub-techniques
+    # the corpus detects, one adopting a technique nothing detects.
+    entries = {
+        "AML.T9001": {"name": "Adopted Credential Dumping", "cross_refs": ["T1003"]},
+        "AML.T9002": {"name": "Adopted Phishing", "cross_refs": ["T1566"]},
+        "AML.T9003": {"name": "Native AI Technique"},
+    }
+    mongo.load_techniques(
+        mongo_db,
+        [{"technique_id": k, **v} for k, v in entries.items()],
+        framework="atlas",
+        framework_version="test",
+    )
+
+    report = mongo.framework_coverage(mongo_db, framework="atlas", framework_version="test")
+    mongo_covered = {e["id"] for e in report["entries"] if e["rules"]}
+
+    # The Python walk over the same rules and the same cross-references.
+    counts: dict[str, int] = {}
+    for rule in index.rules:
+        for tech in rule.techniques:
+            counts[tech] = counts.get(tech, 0) + 1
+    meta = {"techniques": {k: v for k, v in entries.items()}}
+    kb_covered = {e["id"] for e in kb.observed_atlas(counts, meta)}
+
+    assert mongo_covered == kb_covered == {"AML.T9001"}
+    assert report["entries_covered_by_cross_reference"] == 1
+    assert "inherited" in report["coverage_basis"]
+
+
+@pytest.mark.mongo
+def test_attack_coverage_is_unchanged_by_the_bridge(mongo_db, corpus):
+    """ATT&CK has no cross_refs, so its join must stay the direct one."""
+    index, meta = corpus
+    mongo.load_rules(mongo_db, index, framework_version="19.2")
+    mongo.load_techniques(
+        mongo_db,
+        [{"technique_id": k, **v} for k, v in meta["techniques"].items()],
+        framework="enterprise-attack",
+        framework_version="19.2",
+    )
+    report = mongo.framework_coverage(mongo_db, framework="enterprise-attack")
+    assert report["entries_covered_by_cross_reference"] == 0
+    assert report["coverage_basis"] == "rules citing the entry directly"

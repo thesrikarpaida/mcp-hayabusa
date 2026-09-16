@@ -758,11 +758,23 @@ def scan_evtx_attack(
         {"id": tid, "name": kb.technique_name(tid, meta), "detections": count}
         for tid, count in sorted(per_tech.items(), key=lambda kv: (-kv[1], kv[0]))
     ]
+    # MITRE adopted 44 ATT&CK techniques into the ATLAS matrix and kept their
+    # ids, so an observed ATT&CK technique also evidences the ATLAS entry that
+    # cites it. This is inherited coverage of the *conventional* technique, not
+    # detection of an AI-specific attack — hence the explicit basis field.
+    atlas = kb.observed_atlas(per_tech, kb.load_atlas_metadata())
+
     report = {
         "total": scan["total"],
         "counts": scan["counts"],
         "techniques_observed": techniques,
         "tactics_observed": dict(sorted(per_tactic.items(), key=lambda kv: -kv[1])),
+        "atlas_observed": atlas,
+        "atlas_basis": (
+            "ATLAS entries whose adopted ATT&CK technique was observed; inherited "
+            "coverage of conventional tradecraft against an AI target, not detection "
+            "of an AI-specific attack"
+        ),
         "unmapped_detections": unmapped,
         "returned": len(annotated[:max_results] if max_results else annotated),
         "detections": annotated[:max_results] if max_results else annotated,

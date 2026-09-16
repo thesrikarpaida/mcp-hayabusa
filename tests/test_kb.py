@@ -658,3 +658,56 @@ def test_technique_detail_is_case_insensitive(kb_env):
     detail = kb.technique_detail(kb.load_index(), kb.load_attack_metadata(), "t1047")
     assert detail["id"] == "T1047"
     assert detail["coverage"]["assessment"] == "covered"
+
+
+# --------------------------------------------------------------------------
+# The ATLAS bridge, Python side. No MongoDB — this is the path scan_evtx_attack
+# takes, and it has to work with the container stopped.
+# --------------------------------------------------------------------------
+
+ATLAS_META = {
+    "techniques": {
+        # MITRE adopted these from ATT&CK and kept the ids.
+        "AML.T0050": {
+            "name": "Command and Scripting Interpreter",
+            "tactics": ["execution"],
+            "cross_refs": ["T1059"],
+        },
+        "AML.T0090": {"name": "OS Credential Dumping", "cross_refs": ["T1003"]},
+        # AI-native: no conventional counterpart, so never observable here.
+        "AML.T0051": {"name": "LLM Prompt Injection", "tactics": ["execution"]},
+    }
+}
+
+
+def test_observed_atlas_credits_a_parent_from_its_subtechnique():
+    """ATLAS cites T1059; the rule that fires tags T1059.001."""
+    rolled = kb.observed_atlas({"T1059.001": 3}, ATLAS_META)
+    assert [e["id"] for e in rolled] == ["AML.T0050"]
+    assert rolled[0]["via"] == ["T1059.001"]
+    assert rolled[0]["detections"] == 3
+    assert rolled[0]["tactics"] == ["execution"]
+
+
+def test_observed_atlas_sums_several_techniques_into_one_entry():
+    rolled = kb.observed_atlas({"T1059.001": 2, "T1059.003": 1}, ATLAS_META)
+    assert rolled[0]["detections"] == 3
+    assert rolled[0]["via"] == ["T1059.001", "T1059.003"]
+
+
+def test_observed_atlas_ignores_entries_with_no_cross_reference():
+    """An AI-native ATLAS technique can never be evidenced by an EVTX scan."""
+    rolled = kb.observed_atlas({"T1059.001": 1, "T1003.001": 1}, ATLAS_META)
+    assert "AML.T0051" not in {e["id"] for e in rolled}
+    assert {e["id"] for e in rolled} == {"AML.T0050", "AML.T0090"}
+
+
+def test_observed_atlas_is_empty_without_atlas_metadata():
+    """A missing mappings/atlas.yaml degrades to no rollup, not an error."""
+    assert kb.observed_atlas({"T1059.001": 1}, {"techniques": {}}) == []
+    assert kb.observed_atlas({}, ATLAS_META) == []
+
+
+def test_atlas_from_attack_inverts_the_cross_references():
+    inverted = kb.atlas_from_attack(ATLAS_META)
+    assert inverted == {"T1059": ["AML.T0050"], "T1003": ["AML.T0090"]}

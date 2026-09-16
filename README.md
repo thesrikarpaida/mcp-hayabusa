@@ -455,12 +455,45 @@ BSON document limit; the response reports `detections_truncated` when that bites
 | Framework | `framework` value | Entries | Source |
 | --- | --- | --- | --- |
 | MITRE ATT&CK Enterprise | `enterprise-attack` | 858 (19.2), 835 (18.1) | STIX bundle from `mitre-attack/attack-stix-data` |
-| MITRE ATLAS | `atlas` | 197 (2026.08) | ATLAS's own `atlas_to_stix.py --include-attack` export |
+| MITRE ATLAS | `atlas` | 208 (2026.09) | ATLAS's own `atlas_to_stix.py --include-attack` export |
 | OWASP LLM Top 10 | `owasp-llm-top-10` | 10 (2026) | `data/owasp_frameworks.yaml` |
 | OWASP Agentic Top 10 | `owasp-agentic-top-10` | 10 (2026) | `data/owasp_frameworks.yaml` |
 
-No Sigma rule maps to `LLM01`, so OWASP coverage reads as twenty gaps. That is an honest
-statement about what Windows EVTX can observe, not a broken query.
+### The ATLAS bridge
+
+ATLAS is not a parallel universe: MITRE **adopted 44 ATT&CK techniques into the ATLAS
+matrix and kept their ids**, so `AML.T0050` *is* `T1059` Command and Scripting
+Interpreter seen from an AI target. `mappings/atlas.yaml` records those as `cross_refs`,
+and coverage follows them:
+
+```
+ATLAS 2026.09:  208 entries  ->  29 covered, 179 gaps
+                                  all 29 inherited via cross_refs
+```
+
+That flows to both surfaces from one piece of data:
+
+- `framework_coverage(framework="atlas")` — *could* we detect it — resolves an entry
+  through the rules detecting its conventional counterpart.
+- `scan_evtx_attack` — *did* we see it — gains an `atlas_observed` block derived from
+  the same scan, no second pass.
+
+**Read `coverage_basis` / `atlas_basis` before quoting either number.** This is
+inherited coverage of conventional tradecraft against a host that happens to be an AI
+target. It is *not* detection of an AI-specific attack: the 179 remaining entries
+(`LLM Prompt Injection`, `Create Proxy AI Model`) leave no Windows event and stay gaps
+permanently.
+
+Sub-technique widening happens at ingest — ATLAS cites `T1059`, the rule that fires tags
+`T1059.001` — so the `$lookup` stays an exact multikey join. A test asserts the Mongo
+aggregation and the Python walk return the same covered set, for the same reason
+`kb.coverage` and `mongo.coverage` must agree.
+
+**OWASP gets no bridge, deliberately.** Unlike ATLAS, OWASP publishes no ATT&CK
+cross-reference, so there is nothing authoritative to inherit from — any mapping would
+be our own judgement. No Sigma rule maps to `LLM01`, so OWASP coverage reads as twenty
+gaps. That is an honest statement about what Windows EVTX can observe, not a broken
+query, and it is a stronger claim than a hand-authored guess.
 
 ### Comparing ATT&CK releases
 

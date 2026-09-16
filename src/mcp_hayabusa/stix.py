@@ -118,6 +118,21 @@ def _has_source(obj: dict[str, Any], sources: tuple[str, ...]) -> bool:
     )
 
 
+def _all_ids(obj: dict[str, Any], source: str) -> list[str]:
+    """Every ``external_id`` this object carries from one source, deduped.
+
+    Unlike :func:`external_id`, which returns the single most authoritative id,
+    this keeps all of them: an ATLAS technique may cite more than one ATT&CK
+    technique, and dropping the extras would understate inherited coverage.
+    """
+    seen = {
+        str(ref["external_id"])
+        for ref in obj.get("external_references") or []
+        if ref.get("source_name") == source and ref.get("external_id")
+    }
+    return sorted(seen)
+
+
 def _tactic_slugs(obj: dict[str, Any]) -> list[str]:
     """Tactic slugs from a technique's kill chain phases.
 
@@ -136,6 +151,7 @@ def parse_bundle(
     collection: str = "",
     description_chars: int = DESCRIPTION_CHARS,
     attach_subtechniques: bool = True,
+    cross_reference: str = "",
 ) -> ParsedBundle:
     """Reduce a STIX bundle to techniques, tactics and the release version.
 
@@ -150,6 +166,13 @@ def parse_bundle(
         bundle that holds more than one framework — see the module docstring.
     :param collection: name of the ``x-mitre-collection`` to read the release
         version from, when the bundle contains several.
+    :param cross_reference: an ``external_references`` source name to record
+        *alongside* the chosen id, as ``cross_refs``. ATLAS adopted 44 ATT&CK
+        techniques into its own matrix and keeps their ids, so reading ATLAS
+        with ``cross_reference="mitre-attack"`` captures MITRE's own statement
+        that ``AML.T0050`` *is* ``T1059`` seen from an AI target. That is what
+        lets ATLAS inherit detection coverage instead of reading as 197 gaps.
+        Ignored for the framework the ids are being taken from.
 
     Revoked techniques keep their entry and gain ``superseded_by``. Dropping
     them instead would be the silent-coverage-loss bug this whole exercise is
@@ -203,6 +226,10 @@ def parse_bundle(
                 "deprecated": bool(obj.get("x_mitre_deprecated", False)),
                 "revoked": bool(obj.get("revoked", False)),
             }
+            if cross_reference and cross_reference not in sources:
+                refs = _all_ids(obj, cross_reference)
+                if refs:
+                    parsed.techniques[tid]["cross_refs"] = refs
 
         elif otype == "relationship" and obj.get("relationship_type") == "revoked-by":
             revoked_by[obj["source_ref"]] = obj["target_ref"]

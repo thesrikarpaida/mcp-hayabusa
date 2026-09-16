@@ -1,7 +1,7 @@
 _generated_by: scripts/build_atlas_mappings.py
 _source: https://github.com/mitre-atlas/atlas-data
 _spec_version: ''
-_atlas_version: '2026.08'
+_atlas_version: '2026.09'
 _note: Generated file — do not hand-edit; re-run the script to refresh. The MCP server reads this offline
   and never fetches ATLAS at runtime.
 tactics:
@@ -72,25 +72,20 @@ tactics:
 techniques:
   AML.T0000:
     name: Search Open Technical Databases
-    description: 'Adversaries may search for publicly available research and technical documentation to
-      learn how and where AI is used within a victim organization.
-
-      The adversary can use this information to identify targets for attack, or to tailor an existing
-      attack to make it more effective.
-
-      Organizations often use open source model architectures trained on additional proprietary data in
-      production.
-
+    description: Adversaries may search for publicly available research and technical documentation to
+      learn how and where AI is used within a victim organization. The adversary can use this information
+      to identify targets for attack, or to tailor an existing attack to make it more effective. Organizations
+      often use open source model architectures trained on additional proprietary data in production.
       Knowledge of this underlying architecture allows the adversary to craft more realistic proxy models
       ([Create Proxy AI Model](/techniques/AML.T0005)).
-
-      An adversary can search these resources for publications by aut …'
     tactics:
     - reconnaissance
     is_subtechnique: false
     url: https://atlas.mitre.org/techniques/AML.T0000
     deprecated: false
     revoked: false
+    cross_refs:
+    - T1596
   AML.T0000.000:
     name: Journals and Conference Proceedings
     description: 'Many of the publications accepted at premier artificial intelligence conferences and
@@ -126,6 +121,8 @@ techniques:
     url: https://atlas.mitre.org/techniques/AML.T0000.001
     deprecated: false
     revoked: false
+    cross_refs:
+    - T1596
   AML.T0000.002:
     name: Technical Blogs
     description: 'Research labs at academic institutions and company R&D divisions often have blogs that
@@ -147,6 +144,22 @@ techniques:
     url: https://atlas.mitre.org/techniques/AML.T0000.002
     deprecated: false
     revoked: false
+    cross_refs:
+    - T1596
+  AML.T0000.003:
+    name: Scan Databases
+    description: Adversaries may search public internet-scan services to identify a victim's exposed AI
+      infrastructure. These services, such as Shodan and Censys, continuously scan the internet and publish
+      the active IP addresses, hostnames, open ports, and service banners, which adversaries can query
+      without interacting with the target directly.
+    tactics:
+    - reconnaissance
+    is_subtechnique: true
+    url: https://atlas.mitre.org/techniques/AML.T0000.003
+    deprecated: false
+    revoked: false
+    cross_refs:
+    - T1596.005
   AML.T0001:
     name: Search Open AI Vulnerability Analysis
     description: 'Much like the [Search Open Technical Databases](/techniques/AML.T0000), there is often
@@ -246,6 +259,8 @@ techniques:
     url: https://atlas.mitre.org/techniques/AML.T0003
     deprecated: false
     revoked: false
+    cross_refs:
+    - T1594
   AML.T0004:
     name: Search Application Repositories
     description: 'Adversaries may search open application repositories during targeting.
@@ -310,7 +325,8 @@ techniques:
     revoked: false
   AML.T0006:
     name: Active Scanning
-    description: An adversary may probe or scan the victim system to gather information for targeting.
+    description: Adversaries may actively scan for publicly reachable AI systems and resources for targeting.
+      They may identify resources or systems that are misconfigured or are known vulnerable versions.
       This is distinct from other reconnaissance techniques that do not involve direct interaction with
       the victim system.
     tactics:
@@ -319,6 +335,60 @@ techniques:
     url: https://atlas.mitre.org/techniques/AML.T0006
     deprecated: false
     revoked: false
+    cross_refs:
+    - T1595
+  AML.T0006.000:
+    name: Enumerate Hosted AI Resources
+    description: Adversaries may directly probe an agentic or SaaS platform to enumerate the resources
+      a specific victim has deployed on it. Platforms frequently host AI agents behind predictable URL
+      structures derived from identifiers such as environment, tenant, resource-group, or agent names,
+      and default out-of-the-box deployment configurations keep these conventions consistent across victims.
+    tactics:
+    - reconnaissance
+    is_subtechnique: true
+    url: https://atlas.mitre.org/techniques/AML.T0006.000
+    deprecated: false
+    revoked: false
+  AML.T0006.001:
+    name: Query Platform Metadata APIs
+    description: Adversaries may query documented or undocumented APIs in agentic SaaS hosting platforms
+      to uncover agentic targets. SaaS and agentic platforms can expose provider control-plane or identity
+      APIs that return tenant, environment, or deployment information IDs, including for resources that
+      are misconfigured or unintentionally accessible by unauthenticated users.
+    tactics:
+    - reconnaissance
+    is_subtechnique: true
+    url: https://atlas.mitre.org/techniques/AML.T0006.001
+    deprecated: false
+    revoked: false
+  AML.T0006.002:
+    name: Scan for Exposed AI Infrastructure
+    description: Adversaries may scan network ports and services to identify deployed AI backends, model-serving
+      endpoints, and AI agent infrastructure reachable over the internet. Self-hosted AI runtimes typically
+      listen on predictable, well-known ports and expose standard API paths, allowing adversaries to efficiently
+      locate candidate hosts and infer the platform running on them.
+    tactics:
+    - reconnaissance
+    is_subtechnique: true
+    url: https://atlas.mitre.org/techniques/AML.T0006.002
+    deprecated: false
+    revoked: false
+    cross_refs:
+    - T1595
+  AML.T0006.003:
+    name: Probe AI Agent Trigger Channels
+    description: Adversaries may send crafted inputs to potential public triggers, such as email addresses,
+      webhooks, or messaging channels, to elicit a response that indicates an invocation of agentic activity.
+      The nature of the response and its content can often reveal agent-managed accounts and expose the
+      additional agentic attack surface. Identified triggers can be used to directly attack the agent.
+    tactics:
+    - reconnaissance
+    is_subtechnique: true
+    url: https://atlas.mitre.org/techniques/AML.T0006.003
+    deprecated: false
+    revoked: false
+    cross_refs:
+    - T1595
   AML.T0007:
     name: Discover AI Artifacts
     description: 'Adversaries may search private sources to identify AI learning artifacts that exist
@@ -351,6 +421,8 @@ techniques:
     url: https://atlas.mitre.org/techniques/AML.T0008
     deprecated: false
     revoked: false
+    cross_refs:
+    - T1583
   AML.T0008.000:
     name: AI Development Workspaces
     description: 'Developing and staging AI attacks often requires expensive compute resources.
@@ -390,6 +462,8 @@ techniques:
     url: https://atlas.mitre.org/techniques/AML.T0008.002
     deprecated: false
     revoked: false
+    cross_refs:
+    - T1583.001
   AML.T0008.003:
     name: Physical Countermeasures
     description: Adversaries may acquire or manufacture physical countermeasures to aid or support their
@@ -412,6 +486,8 @@ techniques:
     url: https://atlas.mitre.org/techniques/AML.T0008.004
     deprecated: false
     revoked: false
+    cross_refs:
+    - T1583.007
   AML.T0008.005:
     name: AI Service Proxies
     description: Adversaries may utilize commercial proxy services that resell access to AI services such
@@ -587,6 +663,8 @@ techniques:
     url: https://atlas.mitre.org/techniques/AML.T0011.003
     deprecated: false
     revoked: false
+    cross_refs:
+    - T1204
   AML.T0012:
     name: Valid Accounts
     description: 'Adversaries may obtain and abuse credentials of existing accounts as a means of gaining
@@ -602,6 +680,8 @@ techniques:
     url: https://atlas.mitre.org/techniques/AML.T0012
     deprecated: false
     revoked: false
+    cross_refs:
+    - T1078
   AML.T0013:
     name: Discover AI Model Ontology
     description: 'Adversaries may discover the ontology of an AI model''s output space, for example, the
@@ -656,6 +736,8 @@ techniques:
     url: https://atlas.mitre.org/techniques/AML.T0016
     deprecated: false
     revoked: false
+    cross_refs:
+    - T1588
   AML.T0016.000:
     name: Adversarial AI Attack Implementations
     description: Adversaries may search for existing open source implementations of AI attacks. The research
@@ -684,6 +766,8 @@ techniques:
     url: https://atlas.mitre.org/techniques/AML.T0016.001
     deprecated: false
     revoked: false
+    cross_refs:
+    - T1588.002
   AML.T0016.002:
     name: Generative AI
     description: Adversaries may search for and obtain generative AI models or tools, such as large language
@@ -711,6 +795,8 @@ techniques:
     url: https://atlas.mitre.org/techniques/AML.T0016.003
     deprecated: false
     revoked: false
+    cross_refs:
+    - T1588.005
   AML.T0016.004:
     name: AI Agent Tools
     description: Adversaries may search for and obtain tools extend the capabilities of an AI agent. These
@@ -735,6 +821,8 @@ techniques:
     url: https://atlas.mitre.org/techniques/AML.T0017
     deprecated: false
     revoked: false
+    cross_refs:
+    - T1587
   AML.T0017.000:
     name: Adversarial AI Attacks
     description: 'Adversaries may develop their own adversarial attacks.
@@ -865,6 +953,8 @@ techniques:
     url: https://atlas.mitre.org/techniques/AML.T0021
     deprecated: false
     revoked: false
+    cross_refs:
+    - T1585
   AML.T0024:
     name: Exfiltration via AI Inference API
     description: 'Adversaries may exfiltrate private information via [AI Model Inference API Access](/techniques/AML.T0040).
@@ -1034,6 +1124,8 @@ techniques:
     url: https://atlas.mitre.org/techniques/AML.T0036
     deprecated: false
     revoked: false
+    cross_refs:
+    - T1213
   AML.T0037:
     name: Data from Local System
     description: Adversaries may search local system sources, such as file systems and configuration files
@@ -1044,6 +1136,8 @@ techniques:
     url: https://atlas.mitre.org/techniques/AML.T0037
     deprecated: false
     revoked: false
+    cross_refs:
+    - T1005
   AML.T0040:
     name: AI Model Inference API Access
     description: 'Adversaries may gain access to a model via legitimate access to the inference API.
@@ -1308,6 +1402,8 @@ techniques:
     url: https://atlas.mitre.org/techniques/AML.T0049
     deprecated: false
     revoked: false
+    cross_refs:
+    - T1190
   AML.T0050:
     name: Command and Scripting Interpreter
     description: Adversaries may abuse command and script interpreters to execute commands, scripts, or
@@ -1321,6 +1417,8 @@ techniques:
     url: https://atlas.mitre.org/techniques/AML.T0050
     deprecated: false
     revoked: false
+    cross_refs:
+    - T1059
   AML.T0051:
     name: LLM Prompt Injection
     description: 'An adversary may craft malicious prompts as inputs to an LLM that cause the LLM to act
@@ -1347,11 +1445,11 @@ techniques:
     revoked: false
   AML.T0051.001:
     name: Indirect
-    description: 'An adversary may inject prompts indirectly via a separate data channel ingested by the
-      LLM, such as text or multimedia pulled from databases or websites.
-
-      These malicious prompts may be hidden or obfuscated from the user. This type of injection may be
-      used by the adversary to gain a foothold in the system or to target an unwitting user of the system.'
+    description: An adversary may inject prompts indirectly via a separate data channel that the LLM or
+      AI agent ingests, such as text or multimedia pulled from documents, emails, databases or websites.
+      These instructions originate from adversary-controlled content rather than the legitimate user,
+      and are frequently hidden or obfuscated (See [LLM Prompt Obfuscation](/techniques/AML.T0068)) from
+      the user, for example as invisible text.
     tactics:
     - execution
     is_subtechnique: true
@@ -1385,6 +1483,8 @@ techniques:
     url: https://atlas.mitre.org/techniques/AML.T0052
     deprecated: false
     revoked: false
+    cross_refs:
+    - T1566
   AML.T0052.000:
     name: Spearphishing via Social Engineering LLM
     description: 'Adversaries may turn LLMs into targeted social engineers.
@@ -1458,6 +1558,8 @@ techniques:
     url: https://atlas.mitre.org/techniques/AML.T0055
     deprecated: false
     revoked: false
+    cross_refs:
+    - T1552
   AML.T0056:
     name: Extract LLM System Prompt
     description: Adversaries may attempt to extract a large language model's (LLM) system prompt. Adversaries
@@ -1705,6 +1807,8 @@ techniques:
     url: https://atlas.mitre.org/techniques/AML.T0073
     deprecated: false
     revoked: false
+    cross_refs:
+    - T1656
   AML.T0074:
     name: Masquerading
     description: Adversaries may attempt to manipulate features of their artifacts to make them appear
@@ -1718,6 +1822,8 @@ techniques:
     url: https://atlas.mitre.org/techniques/AML.T0074
     deprecated: false
     revoked: false
+    cross_refs:
+    - T1036
   AML.T0075:
     name: Enterprise Resource Discovery
     description: Adversaries may discover resources available within an enterprise environment and information
@@ -1744,10 +1850,11 @@ techniques:
     revoked: false
   AML.T0077:
     name: LLM Response Rendering
-    description: An adversary may get a large language model (LLM) to respond with private information
-      that is hidden from the user when the response is rendered by the user's client. The private information
-      is then exfiltrated. This can take the form of rendered images, which automatically make a request
-      to an adversary controlled server.
+    description: Adversaries may induce a large language model (LLM) to respond with private information
+      structured in a reference to external content that, when rendered by the user's client, makes a
+      request to an adversary-controlled server, exfiltrating the data. The private information can be
+      hidden from the user and the external content can still render properly in the user's client, thus
+      not raising the suspicion of the user.
     tactics:
     - exfiltration
     is_subtechnique: false
@@ -1766,6 +1873,8 @@ techniques:
     url: https://atlas.mitre.org/techniques/AML.T0078
     deprecated: false
     revoked: false
+    cross_refs:
+    - T1189
   AML.T0079:
     name: Stage Capabilities
     description: Adversaries may upload, install, or otherwise set up capabilities that can be used during
@@ -1959,6 +2068,8 @@ techniques:
     url: https://atlas.mitre.org/techniques/AML.T0087
     deprecated: false
     revoked: false
+    cross_refs:
+    - T1589
   AML.T0088:
     name: Generate Deepfakes
     description: Adversaries may use generative artificial intelligence (GenAI) to create synthetic media
@@ -1997,6 +2108,8 @@ techniques:
     url: https://atlas.mitre.org/techniques/AML.T0090
     deprecated: false
     revoked: false
+    cross_refs:
+    - T1003
   AML.T0091:
     name: Use Alternate Authentication Material
     description: Adversaries may use alternate authentication material, such as password hashes, Kerberos
@@ -2008,6 +2121,8 @@ techniques:
     url: https://atlas.mitre.org/techniques/AML.T0091
     deprecated: false
     revoked: false
+    cross_refs:
+    - T1550
   AML.T0091.000:
     name: Application Access Token
     description: Adversaries may use stolen application access tokens to bypass the typical authentication
@@ -2019,6 +2134,8 @@ techniques:
     url: https://atlas.mitre.org/techniques/AML.T0091.000
     deprecated: false
     revoked: false
+    cross_refs:
+    - T1550.001
   AML.T0091.001:
     name: Web Session Cookie
     description: Adversaries may use stolen web session cookies to authenticate to AI-enabled applications
@@ -2030,6 +2147,8 @@ techniques:
     url: https://atlas.mitre.org/techniques/AML.T0091.001
     deprecated: false
     revoked: false
+    cross_refs:
+    - T1550.004
   AML.T0092:
     name: Manipulate User LLM Chat History
     description: Adversaries may manipulate a user's large language model (LLM) chat history to cover
@@ -2068,15 +2187,18 @@ techniques:
     revoked: false
   AML.T0095:
     name: Search Open Websites/Domains
-    description: Adversaries may search public websites and/or domains for information about victims that
-      can be used during targeting. Information about victims may be available in various online sites,
-      such as social media, new sites, or domains owned by the victim.
+    description: Adversaries may search public websites and/or domains for information about victims and
+      AI targets that can be used during targeting and to discover opportunities for successful attacks.
+      Information about a victim's attack surface may be available in various online sites, such as social
+      media, news sites, or domains owned by the victim.
     tactics:
     - reconnaissance
     is_subtechnique: false
     url: https://atlas.mitre.org/techniques/AML.T0095
     deprecated: false
     revoked: false
+    cross_refs:
+    - T1593
   AML.T0095.000:
     name: Code Repositories
     description: Adversaries may search public code repositories for information about a victim or victim
@@ -2090,6 +2212,8 @@ techniques:
     url: https://atlas.mitre.org/techniques/AML.T0095.000
     deprecated: false
     revoked: false
+    cross_refs:
+    - T1593.003
   AML.T0096:
     name: AI Service API
     description: Adversaries may communicate using the API of an AI service on the victim's system. The
@@ -2114,6 +2238,8 @@ techniques:
     url: https://atlas.mitre.org/techniques/AML.T0097
     deprecated: false
     revoked: false
+    cross_refs:
+    - T1497
   AML.T0098:
     name: AI Agent Tool Credential Harvesting
     description: Adversaries may attempt to use their access to an AI agent on the victim's system to
@@ -2141,11 +2267,11 @@ techniques:
     revoked: false
   AML.T0100:
     name: AI Agent Clickbait
-    description: Adversaries may craft deceptive web content designed to bait Computer-Using AI agents
-      or AI web browsers into taking unintended actions, such as clicking buttons, copying code, or navigating
-      to specific web pages. These attacks exploit the agent's interpretation of UI content, visual cues,
-      or prompt-like language embedded in the site. When successful, they can lead the agent to inadvertently
-      copy and execute malicious code on the user's operating system.
+    description: Adversaries may craft deceptive content designed to bait computer-using AI agents or
+      AI web browsers and tools into taking unintended actions, such as clicking buttons, copying code,
+      or navigating to specific web pages. These attacks exploit the agent's interpretation of UI content,
+      visual cues, and natural language embedded in processed artifacts, such as a website or a document,
+      and aim at the agent's decision process rather than a human reader's.
     tactics:
     - execution
     is_subtechnique: false
@@ -2199,6 +2325,8 @@ techniques:
     url: https://atlas.mitre.org/techniques/AML.T0105
     deprecated: false
     revoked: false
+    cross_refs:
+    - T1611
   AML.T0106:
     name: Exploitation for Credential Access
     description: Adversaries may exploit software vulnerabilities in an attempt to collect credentials.
@@ -2211,6 +2339,8 @@ techniques:
     url: https://atlas.mitre.org/techniques/AML.T0106
     deprecated: false
     revoked: false
+    cross_refs:
+    - T1211
   AML.T0107:
     name: Exploitation for Defense Evasion
     description: Adversaries may exploit a system or application vulnerability to bypass security features.
@@ -2224,6 +2354,8 @@ techniques:
     url: https://atlas.mitre.org/techniques/AML.T0107
     deprecated: false
     revoked: false
+    cross_refs:
+    - T1211
   AML.T0108:
     name: AI Agent
     description: Adversaries may abuse AI agents present on the victim's system for command and control.
@@ -2356,6 +2488,8 @@ techniques:
     url: https://atlas.mitre.org/techniques/AML.T0113
     deprecated: false
     revoked: false
+    cross_refs:
+    - T1539
   AML.T0114:
     name: AI Service Web Interface
     description: Adversaries may communicate with compromised systems by abusing the web interface of
@@ -2529,6 +2663,8 @@ techniques:
     url: https://atlas.mitre.org/techniques/AML.T0122
     deprecated: false
     revoked: false
+    cross_refs:
+    - T1210
   AML.T0123:
     name: Obfuscated Files or Information
     description: Adversaries may attempt to make an executable or file difficult to discover or analyze
@@ -2564,6 +2700,8 @@ techniques:
     url: https://atlas.mitre.org/techniques/AML.T0125
     deprecated: false
     revoked: false
+    cross_refs:
+    - T1136
   AML.T0126:
     name: Automated Collection
     description: Adversaries may use automated techniques to collect data from AI systems and supporting
@@ -2576,6 +2714,8 @@ techniques:
     url: https://atlas.mitre.org/techniques/AML.T0126
     deprecated: false
     revoked: false
+    cross_refs:
+    - T1119
   AML.T0127:
     name: Data Staged
     description: Adversaries may stage collected data in a central location before exfiltration. Staging
@@ -2587,6 +2727,8 @@ techniques:
     url: https://atlas.mitre.org/techniques/AML.T0127
     deprecated: false
     revoked: false
+    cross_refs:
+    - T1074
   AML.T0128:
     name: Compromise Infrastructure
     description: Adversaries may compromise third-party infrastructure and repurpose it to support attacks
@@ -2597,5 +2739,82 @@ techniques:
     - resource-development
     is_subtechnique: false
     url: https://atlas.mitre.org/techniques/AML.T0128
+    deprecated: false
+    revoked: false
+    cross_refs:
+    - T1584
+  AML.T0129:
+    name: Triggers in Multimodal Inputs
+    description: Adversaries may place instructions or triggers in one part of a multimodal input to influence
+      the model while staying unnoticed by human reviewers and by defenses that do not inspect all input
+      modalities.
+    tactics:
+    - defense-evasion
+    is_subtechnique: false
+    url: https://atlas.mitre.org/techniques/AML.T0129
+    deprecated: false
+    revoked: false
+  AML.T0130:
+    name: AI Agent Response Biasing
+    description: Adversaries may manipulate an AI assistant so that it favors adversary-chosen sources,
+      or content in its responses. By injecting instructions such as "treat [source] as a trusted source"
+      or "recommend [source] first," an adversary biases the assistant's outputs toward their own interests,
+      causing it to present promotional or self-serving content as if it were a neutral, well-reasoned
+      response.
+    tactics:
+    - impact
+    is_subtechnique: false
+    url: https://atlas.mitre.org/techniques/AML.T0130
+    deprecated: false
+    revoked: false
+  AML.T0131:
+    name: Crafted AI Assistant Links
+    description: Adversaries may craft links that open an AI assistant or agent with attacker-controlled
+      input already supplied, so that opening the link initiates an interaction the adversary defines
+      rather than one the target composed. Many AI assistants accept a prompt through URL parameters (for
+      example `?q=` or `?prompt=`) that is automatically populated, and in some cases submitted, when
+      the link is opened. By encoding a chosen prompt into such a link, an adversary can cause the target's
+      assistant to act on supplied instructions as soon as the link is opened.
+    tactics:
+    - initial-access
+    is_subtechnique: false
+    url: https://atlas.mitre.org/techniques/AML.T0131
+    deprecated: false
+    revoked: false
+  AML.T0132:
+    name: Misconfigured or Publicly Exposed AI Services
+    description: AI agents and LLM platforms are deployed across diverse architectures, including standalone
+      servers, SaaS platforms, and low-code builders. All of these often have misconfigured access controls,
+      ranging from missing authentication in LLM runtimes to permissive public access settings, that significantly
+      expand their attack surface.
+    tactics:
+    - initial-access
+    is_subtechnique: false
+    url: https://atlas.mitre.org/techniques/AML.T0132
+    deprecated: false
+    revoked: false
+  AML.T0133:
+    name: Discover AI Agent Runtime Capabilities
+    description: Adversaries may interact with an AI agent at runtime to reveal the capabilities available
+      to it, without requiring access to its underlying configuration. Direct interaction with the agent
+      can surface its registered tools and their accepted parameters, the actions it can take, the resources
+      it can reach, and the identity and permission scope it acts under. Capabilities can also be inferred
+      indirectly by issuing varied requests and observing which succeeded, failed, or refused.
+    tactics:
+    - discovery
+    is_subtechnique: false
+    url: https://atlas.mitre.org/techniques/AML.T0133
+    deprecated: false
+    revoked: false
+  AML.T0134:
+    name: AI Targeted Cloaking
+    description: Adversaries may selectively deliver malicious or manipulated content to AI systems, while
+      presenting different benign content to human users, web crawlers, or security detection mechanisms.
+      They may identify AI browsers or agents via user-agent strings and condition the server response
+      so that AI-based clients receive prompt injections or misleading content.
+    tactics:
+    - defense-evasion
+    is_subtechnique: false
+    url: https://atlas.mitre.org/techniques/AML.T0134
     deprecated: false
     revoked: false

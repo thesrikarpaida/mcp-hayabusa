@@ -80,6 +80,12 @@ def main() -> int:
         sources=ATLAS_SOURCES,
         require_source=True,
         collection=ATLAS_COLLECTION,
+        # Keep the ATT&CK ids ATLAS cites on its own techniques. require_source
+        # above stops them being used as the *identity* (which would overwrite
+        # real ATT&CK entries); this records them as a relationship instead, so
+        # an ATLAS entry can inherit coverage from the rules detecting its
+        # conventional counterpart.
+        cross_reference="mitre-attack",
     )
     version = args.version or parsed.version or mongo.UNKNOWN_VERSION
 

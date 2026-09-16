@@ -423,6 +423,78 @@ def load_attack_metadata() -> dict:
     }
 
 
+def load_atlas_metadata() -> dict:
+    """Load MITRE ATLAS metadata from mappings/atlas.yaml.
+
+    Same shape as :func:`load_attack_metadata`, plus ``cross_refs`` on the 44
+    ATLAS techniques MITRE adopted from ATT&CK. Missing file is not fatal: the
+    ATLAS rollup is then simply absent, exactly as before the bridge existed.
+    """
+    path = CONFIG.mappings_dir / "atlas.yaml"
+    if not path.is_file():
+        return {"techniques": {}, "tactics": {}}
+    try:
+        doc = yaml.load(path.read_text(encoding="utf-8"), Loader=_Loader)
+    except (yaml.YAMLError, OSError) as exc:
+        raise KnowledgeBaseError(f"could not read {path}: {exc}") from exc
+    if not isinstance(doc, dict):
+        raise KnowledgeBaseError(f"{path} must contain a YAML mapping")
+    techniques = doc.get("techniques") or {}
+    tactics = doc.get("tactics") or {}
+    return {
+        "techniques": {str(k).upper(): v for k, v in techniques.items() if isinstance(v, dict)},
+        "tactics": tactics if isinstance(tactics, dict) else {},
+    }
+
+
+def atlas_from_attack(atlas_meta: dict) -> dict[str, list[str]]:
+    """Invert ATLAS's ``cross_refs`` into ATT&CK id -> ATLAS ids.
+
+    Built once per call rather than stored, because it is derived from
+    ``atlas.yaml`` and would otherwise be a second thing to keep in step.
+    """
+    out: dict[str, list[str]] = {}
+    for aid, entry in (atlas_meta.get("techniques") or {}).items():
+        for ref in entry.get("cross_refs") or []:
+            out.setdefault(str(ref).upper(), []).append(aid)
+    return {k: sorted(set(v)) for k, v in out.items()}
+
+
+def observed_atlas(technique_counts: dict[str, int], atlas_meta: dict) -> list[dict]:
+    """Roll observed ATT&CK techniques up into the ATLAS entries that cite them.
+
+    A sub-technique credits its parent's cross-reference too: ATLAS cites
+    ``T1059``, while a rule that fires tags ``T1059.001``. Without the parent
+    walk the bridge would miss almost every real detection.
+
+    The result says *"the conventional technique this ATLAS entry adopted was
+    observed"* — never that an AI-specific attack was detected. Callers must
+    keep that distinction in the wording they present.
+    """
+    by_attack = atlas_from_attack(atlas_meta)
+    rolled: dict[str, dict] = {}
+    for tid, count in technique_counts.items():
+        candidates = [tid.upper()]
+        if "." in tid:
+            candidates.append(tid.split(".", 1)[0].upper())
+        for cand in candidates:
+            for aid in by_attack.get(cand, []):
+                row = rolled.setdefault(aid, {"id": aid, "via": set(), "detections": 0})
+                row["via"].add(tid)
+                row["detections"] += count
+    entries = atlas_meta.get("techniques") or {}
+    return [
+        {
+            "id": aid,
+            "name": str(entries.get(aid, {}).get("name") or ""),
+            "tactics": list(entries.get(aid, {}).get("tactics") or []),
+            "via": sorted(row["via"]),
+            "detections": row["detections"],
+        }
+        for aid, row in sorted(rolled.items(), key=lambda kv: (-kv[1]["detections"], kv[0]))
+    ]
+
+
 def technique_name(tech_id: str, meta: dict) -> str | None:
     """Human-readable name for a technique id, or None if not in the mappings.
 

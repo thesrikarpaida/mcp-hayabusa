@@ -183,6 +183,26 @@ It forces `profile="standard"` — the leanest profile that carries `RuleID`.
 - **`unmapped_detections` is the number to watch.** It counts hits whose rule id
   isn't in the index. Anything above zero usually means a stale cache — run
   `make build-index`. Detections are never dropped, only counted here.
+- **`atlas_observed` is inherited coverage, and the payload says so.** MITRE
+  adopted 44 ATT&CK techniques into the ATLAS matrix keeping their ids, so an
+  observed ATT&CK technique also evidences the ATLAS entry citing it. The scan
+  above observed `T1059.001`, which rolls to `T1059`, which ATLAS adopted as
+  `AML.T0050`:
+
+  ```json
+  "atlas_observed": [
+    {"id": "AML.T0050", "name": "Command and Scripting Interpreter",
+     "tactics": ["execution"], "via": ["T1059.001"], "detections": 1}
+  ],
+  "atlas_basis": "ATLAS entries whose adopted ATT&CK technique was observed; inherited coverage of conventional tradecraft against an AI target, not detection of an AI-specific attack"
+  ```
+
+  Read `atlas_basis` before quoting the number. This says conventional tradecraft
+  was seen on a host that happens to be an AI target — **not** that an AI-specific
+  attack was detected. Prompt injection, model poisoning and proxy-model
+  extraction leave no Windows event and will never appear here.
+- The ATLAS rollup needs `mappings/atlas.yaml` and no MongoDB. Missing file means
+  `atlas_observed` is simply empty.
 - **Untagged rules produce `"techniques": []`, and that is not a bug.** Four of
   the five detections above come from Hayabusa's `PwSh Scriptblock` rule, which
   carries no `tags:` at all. They are real events with no ATT&CK mapping to make.
@@ -719,27 +739,37 @@ container stopped, it returns an explanation rather than failing:
 
 ```json
 {
-  "framework": "owasp-llm-top-10",
-  "framework_version": "2026",
-  "entries_total": 10,
-  "entries_covered": 0,
-  "entries_gap": 10,
-  "rules_mapped": 0,
-  "tactics": {},
+  "framework": "atlas",
+  "framework_version": "2026.09",
+  "entries_total": 208,
+  "entries_covered": 29,
+  "entries_gap": 179,
+  "entries_covered_by_cross_reference": 29,
+  "coverage_basis": "inherited from the ATT&CK techniques this framework adopted; conventional tradecraft against an AI target, not AI-specific detection",
+  "rules_mapped": 1663,
   "entries": [
-    {"id": "LLM01", "name": "Prompt Injection", "rules": 0},
-    {"id": "LLM02", "name": "Sensitive Information Disclosure", "rules": 0}
+    {"id": "AML.T0050", "name": "Command and Scripting Interpreter", "cross_refs": ["T1059", "T1059.001", "…"], "rules": 604},
+    {"id": "AML.T0090", "name": "OS Credential Dumping", "cross_refs": ["T1003", "…"], "rules": 219}
   ]
 }
 ```
 
 **Notes**
 
-- **Expect ATLAS and OWASP to read as all gaps, and that is the honest answer.**
-  Zero of the 4,965 indexed rules cite an `AML.*` or `LLM*` id — Sigma rules tag
-  ATT&CK. ATLAS describes attacks on ML systems and OWASP describes LLM application
-  risks; neither is observable in Windows EVTX. The frameworks are an **inventory**
-  here, not a detection surface.
+- **ATLAS coverage is *inherited*, never native.** All 29 covered entries come via
+  `cross_refs` — the ATT&CK ids MITRE adopted into the ATLAS matrix. `coverage_basis`
+  states this in the payload; quote it alongside the number. The remaining 179
+  entries are AI-native (`LLM Prompt Injection`, `Create Proxy AI Model`) and have
+  no conventional counterpart, so they stay gaps permanently.
+- **OWASP reads as 20 gaps, and that is the honest answer.** Unlike ATLAS, OWASP
+  publishes no ATT&CK cross-reference, so there is nothing to inherit from. Zero
+  indexed rules cite an `LLM*` or `ASI*` id. Those two frameworks are an
+  **inventory** here, not a detection surface.
+- **Sub-technique widening happens at ingest.** ATLAS cites `T1059`; the rule that
+  fires tags `T1059.001`. `load_techniques()` expands a parent cross-reference to
+  the sub-technique ids the corpus actually cites, so the `$lookup` stays an exact
+  multikey join rather than a per-entry prefix scan — and so this agrees with
+  `kb.observed_atlas`, which walks parents in Python. A test asserts that equality.
 - The `$lookup` joins `attack_techniques.technique_id` against the
   `sigma_rules.techniques` **array**, served by the multikey index.
 - Omitting `framework` reads each framework at its newest ingested version, so two
