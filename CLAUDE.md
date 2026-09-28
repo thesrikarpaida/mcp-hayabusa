@@ -45,9 +45,9 @@ make mongo-stats                       # counts, indexes, per-framework inventor
 make mongo-down
 
 # Run tests
-HAYABUSA_PATH=./hayabusa/hayabusa uv run pytest -v   # all 146 (136 unit + 10 integration)
-uv run pytest -m "not integration" -v                # 136 unit only (no binary needed)
-uv run pytest -m "not integration and not mongo" -v  # 109, needs neither binary nor Mongo
+HAYABUSA_PATH=./hayabusa/hayabusa uv run pytest -v   # all 169 (159 unit + 10 integration)
+uv run pytest -m "not integration" -v                # 159 unit only (no binary needed)
+uv run pytest -m "not integration and not mongo" -v  # 129, needs neither binary nor Mongo
 uv run pytest tests/test_kb.py tests/test_server_kb.py -v   # knowledge base (no binary)
 uv run pytest -m integration -v                      # 10 integration tests only, ~1m20s
 
@@ -261,6 +261,10 @@ Two tiers, both run with `uv run pytest`:
     Wrapper error handling (bad exit, missing binary, path sandboxing).
   - `tests/test_server.py`: `scan_evtx` post-processing against a fake binary emitting
     canned JSONL.
+  - `tests/test_server_reporting.py`: the reporting tools (`logon_summary`, `metrics`,
+    `search`, `list_profiles`). These subcommands reject `-w` and `-N`, so the fixture
+    records argv and asserts on the command line itself — a fake binary that ignores its
+    argv cannot catch that.
   - `tests/test_kb.py`: the knowledge base against a synthetic corpus in `tmp_path`.
     `ATTACK_YAML` / `TACTICS_TXT` / `write_rule()` there are reused by `test_server_kb.py`.
   - `tests/test_server_kb.py`: KB tools/resources, and the `scan_evtx_attack` join (the fake

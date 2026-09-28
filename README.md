@@ -103,7 +103,7 @@ claude mcp list        # hayabusa: connected  ("Pending approval" on first use i
 | `version` fails with "no such file" | `HAYABUSA_PATH` unset and no binary on `PATH` | `make install-hayabusa`, or set `HAYABUSA_PATH` |
 | Binary won't run: `GLIBC_2.38 not found` | glibc too old for the `gnu` build | Re-run `./scripts/install_hayabusa.sh` — it picks `musl` automatically |
 | Integration tests all skip | No binary, or samples not fetched | `make setup && ./scripts/fetch_samples.sh` |
-| 27 tests skip | MongoDB isn't running. **This is correct** — the store is optional | `make mongo-up` only if you want it |
+| 30 tests skip | MongoDB isn't running. **This is correct** — the store is optional | `make mongo-up` only if you want it |
 | A rule you expect never fires | It may be `deprecated`, `unsupported` or `noisy` (disabled by default), or filtered out because its channel isn't in the EVTX | Check the `log` field from `json_timeline` |
 
 <details>
@@ -536,21 +536,21 @@ Editing `rules/` needs no rebuild — that directory is re-scanned on every load
 ## Development
 
 ```bash
-uv run pytest -m "not integration"   # 136 unit tests — fake binary, no download
-uv run pytest -m "not integration and not mongo"   # 109 — no binary, no MongoDB
+uv run pytest -m "not integration"   # 159 unit tests — fake binary, no download
+uv run pytest -m "not integration and not mongo"   # 129 — no binary, no MongoDB
 uv run ruff check .                  # lint
 uv run ruff format .                 # format
 ```
 
-**146 tests total: 136 unit + 10 integration.** The integration tests need the real
-binary, sample logs, and a built index; they skip themselves otherwise. 27 of the unit
+**169 tests total: 159 unit + 10 integration.** The integration tests need the real
+binary, sample logs, and a built index; they skip themselves otherwise. 30 of the unit
 tests need MongoDB and skip the same way — with the container stopped the suite is
-still green (109 passed, 27 skipped, 0 failed), which is how the "Mongo is additive"
+still green (129 passed, 30 skipped, 0 failed), which is how the "Mongo is additive"
 constraint is enforced rather than merely intended:
 
 ```bash
 make setup && ./scripts/fetch_samples.sh
-HAYABUSA_PATH=./hayabusa/hayabusa uv run pytest   # 146 tests
+HAYABUSA_PATH=./hayabusa/hayabusa uv run pytest   # 169 tests
 ```
 
 `conftest.py` finds the binary via `HAYABUSA_PATH` → `./hayabusa/hayabusa` → `PATH`,
